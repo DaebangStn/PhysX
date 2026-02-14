@@ -85,10 +85,11 @@ SET(SOURCE_DISTRO_FILE_LIST "")
 # since that's the default set in: compiler\internal\CMakeLists.txt (using CMAKE_CUDA_ARCHITECTURES)
 # see policy CMP0104
 IF(PX_GENERATE_GPU_REDUCED_ARCHITECTURES)
-	GENERATE_ARCH_CODE_LIST(SASS "80,86,89,90,100,120" PTX "120")
+	# RTX 5090 = sm_120 (Blackwell); PTX for forward compat
+	GENERATE_ARCH_CODE_LIST(SASS "120" PTX "120")
 ELSE()
-	# Volta is the minimum compute arch required because NGC supports V100
-	GENERATE_ARCH_CODE_LIST(SASS "70,80,86,89,90,100,120" PTX "120")
+	# sm_120 (Blackwell/RTX 5090) + older for compat; PTX for forward compat
+	GENERATE_ARCH_CODE_LIST(SASS "80,86,89,90,100,120" PTX "120")
 ENDIF()
 
 # Force response files off because clangd does not parse them

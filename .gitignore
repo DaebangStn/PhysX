@@ -1,0 +1,5 @@
+# Build artifacts
+physx/bin/
+physx/install/
+physx/compiler/linux-clang-*/
+physx/compiler/linux-gcc-*/

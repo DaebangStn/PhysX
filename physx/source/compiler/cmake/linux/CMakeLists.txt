@@ -76,6 +76,8 @@ SET(CLANG_WARNINGS "-ferror-limit=0 -Wall -Wextra -Werror -Weverything\
     -Wno-zero-as-null-pointer-constant \
     -Wno-reserved-identifier \
     -Wno-undefined-func-template \
+    -Wno-format \
+    -Wno-nrvo \
 ")
 
 SET(GCC_WARNINGS "-Wall -Werror \
