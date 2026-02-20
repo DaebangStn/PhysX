@@ -91,7 +91,7 @@ typedef unsigned int GLenum;
 typedef unsigned int GLuint;
 
 //#include <GL/gl.h>
-#include <cudaGL.h>
+// cudaGL.h removed: GL interop unused in pxgym; avoids GL/gl.h dependency on headless machines
 #include <assert.h>
 
 #include "foundation/PxErrors.h"
