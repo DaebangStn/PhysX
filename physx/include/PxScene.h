@@ -1744,6 +1744,14 @@ class PxScene : public PxSceneSQSystem
 	*/
 	virtual void setDeformableVolumeGpuPostSolveCallback(PxPostSolveCallback* postSolveCallback) = 0;
 
+	/**
+	\brief When enabled, skips host DMA-back copies and CPU spin-waits inside
+	fetchResults().  Only safe when using Direct GPU API (eENABLE_DIRECT_GPU_API)
+	since no host-side body/shape data is consumed.  GPU stream ordering still
+	guarantees simulation correctness.
+	*/
+	virtual void setSkipHostSync(bool skip) { PX_UNUSED(skip); }
+
 	void*	userData;	//!< user can assign this to whatever, usually to create a 1:1 relationship with a user object.
 
 	/**

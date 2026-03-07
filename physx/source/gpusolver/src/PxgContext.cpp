@@ -28,6 +28,7 @@
 
 #include "PxgContext.h"
 #include "cudamanager/PxCudaContext.h"
+#include <nvtx3/nvToolsExt.h>
 #include "common/PxProfileZone.h"
 #include "PxgIslandContext.h"
 #include "PxgSolverCore.h"
@@ -153,6 +154,7 @@ namespace physx
 
 		virtual void runInternal() PX_OVERRIDE PX_FINAL
 		{
+			nvtxRangePush("px:batchArtiStaticPrePrep");
 			const PxU32 stride = mNbArticulations;
 
 			//const PxU32 blockCount = (mNbArticulations + 31)/32;
@@ -160,7 +162,7 @@ namespace physx
 			for (PxU32 i = mStartIndex; i < mEndIndex; ++i)
 			{
 				const PxU32 nodeIndex = mNodeIndices[i].index();
-				
+
 				PxgStaticConstraints& staticConstraints = mBodyManager.mStaticConstraints[nodeIndex];
 				const PxU32 staticContactCount = staticConstraints.mStaticContacts.size();
 				PxgStaticConstraint* uniqueIds = staticConstraints.mStaticContacts.begin();
@@ -202,6 +204,7 @@ namespace physx
 					mSelfJointIndices[offset] = selfIds[a].uniqueId;
 				}
 			}
+			nvtxRangePop();
 		}
 	};
 
@@ -243,6 +246,7 @@ namespace physx
 
 		virtual void runInternal() PX_OVERRIDE PX_FINAL
 		{
+			nvtxRangePush("px:batchRigidStaticPrePrep");
 			const PxU32 stride = mNbBodies;
 
 			for (PxU32 i = mStartIndex; i < mEndIndex; ++i)
@@ -268,11 +272,13 @@ namespace physx
 					mStaticJointIndices[offset] = uniqueIds[a].uniqueId;
 				}
 			}
+			nvtxRangePop();
 		}
 	};
 
 	void PxgCpuConstraintPrePrepTask::runInternal()
 	{
+		nvtxRangePush("px:cpuConstraintPrePrep");
 		PX_PROFILE_ZONE("GpuDynamics.PxgCpuJointPrePrepTask", 0);
 		PxU32 currentEdgeIndex = 0;
 
@@ -300,10 +306,12 @@ namespace physx
 		}
 
 		//PxMemCopy(mPinnedEdgeIds + mUniqueIdStartIndex, mEdgeIds, sizeof(PxU32) * mNumEdges);
+		nvtxRangePop();
 	}
 
 	void PxgCpuArtiConstraintPrePrepTask::runInternal()
 	{
+		nvtxRangePush("px:cpuArtiConstraintPrePrep");
 		PX_PROFILE_ZONE("GpuDynamics.PxgCpuArtiJointPrePrepTask", 0);
 		PxU32 currentEdgeIndex = 0;
 		for (PxU32 a = 0; a < mNumBatches; ++a)
@@ -329,11 +337,14 @@ namespace physx
 		}
 
 		//PxMemCopy(mPinnedEdgeIds + mUniqueIdStartIndex, mEdgeIds, sizeof(PxU32) * mNumEdges);
+		nvtxRangePop();
 	}
 
 	void PxgCpuPrepTask::runInternal()
 	{
+		nvtxRangePush("px:cpuPrepTask");
 		mContext.doConstraintPrePrepCommon(mCont);
+		nvtxRangePop();
 	}
 
 	PxgGpuContext::PxgGpuContext(Cm::FlushPool& flushPool, IG::SimpleIslandManager& islandManager, PxU32 maxNumPartitions, PxU32 maxNumStaticPartitions,
@@ -1780,11 +1791,14 @@ namespace physx
 	// and prepares some data for kinematics.
 	void PxgCpuPreIntegrationTask::runInternal()
 	{
+		nvtxRangePush("px:cpuPreIntegration");
 		mContext.doPreIntegrationTaskCommon(mCont);
+		nvtxRangePop();
 	}
 
 	void PxgCpuContactPrePrepTask::runInternal()
 	{
+		nvtxRangePush("px:cpuContactPrePrep");
 		PX_PROFILE_ZONE("GpuDynamics.PxgCpuContactPrePrepTask", 0);
 
 		const PxU32 nbToProcess = mNumBatches;
@@ -1850,6 +1864,7 @@ namespace physx
 
 			//PxMemCopy(mPinnedEdgeIds + uniqueStartIndex, edgeIds, sizeof(PxU32) * nbRemaining);
 		}
+		nvtxRangePop();
 	}
 
 	void PxgGpuContext::allocateTempPinnedSolverMemoryCommon()
@@ -2052,12 +2067,15 @@ void PxgGpuContext::doConstraintPrePrepGPU()
 
 void PxgPostSolveTask::runInternal()
 {
+	nvtxRangePush("px:postSolveTask");
 	mContext.doPostSolveTask(mCont);
+	nvtxRangePop();
 }
 
 //This class kicks off constraint solve on GPU
 void PxgGpuTask::runInternal()
 {
+	nvtxRangePush("px:gpuTask");
 	mContext.mGpuSolverCore->acquireContext();
 
 	mContext.doConstraintJointBlockPrePrepGPU();
@@ -2066,10 +2084,12 @@ void PxgGpuTask::runInternal()
 	mContext.doConstraintSolveGPU(mMaxNodes, *mChangedHandleMap);
 
 	mContext.mGpuSolverCore->releaseContext();
+	nvtxRangePop();
 }
 
 void PxgGpuIntegrationTask::runInternal()
 {
+	nvtxRangePush("px:gpuIntegrationTask");
 	mContext.mGpuSolverCore->acquireContext();
 
 	//for articulation
@@ -2078,14 +2098,16 @@ void PxgGpuIntegrationTask::runInternal()
 	//for soft body update rotation
 	mContext.doSoftbodyGPU();
 
-	//for FEM-cloth 
+	//for FEM-cloth
 	mContext.doFEMClothGPU();
 
 	mContext.mGpuSolverCore->releaseContext();
+	nvtxRangePop();
 }
 
 void PxgGpuPrePrepTask::runInternal()
 {
+	nvtxRangePush("px:gpuPrePrepTask");
 	mContext.mGpuSolverCore->acquireContext();
 
 	mContext.doPreIntegrationGPU();
@@ -2099,6 +2121,7 @@ void PxgGpuPrePrepTask::runInternal()
 	mContext.mGpuSolverCore->releaseContext();
 
 	mContext.cpuJointPrePrepTask(mCont);
+	nvtxRangePop();
 }
 
 void PxgGpuContext::updateBodyCore(PxBaseTask* continuation)

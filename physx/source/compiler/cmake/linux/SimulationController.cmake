@@ -33,6 +33,11 @@ SET(SIMULATIONCONTROLLER_PLATFORM_INCLUDES
 	${PHYSX_SOURCE_DIR}/lowlevel/linux/include
 )
 
+# NVTX profiling: add CUDA toolkit includes for nvtx3/nvToolsExt.h
+IF(PX_GENERATE_GPU_PROJECTS)
+	LIST(APPEND SIMULATIONCONTROLLER_PLATFORM_INCLUDES ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+ENDIF()
+
 # Use generator expressions to set config specific preprocessor definitions
 SET(SIMULATIONCONTROLLER_COMPILE_DEFS
 

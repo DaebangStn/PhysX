@@ -51,6 +51,15 @@
 #include "ScElementInteractionMarker.h"
 
 #if PX_SUPPORT_GPU_PHYSX
+	#include <nvtx3/nvToolsExt.h>
+	#define PX_NVTX_PUSH(name) nvtxRangePush(name)
+	#define PX_NVTX_POP()      nvtxRangePop()
+#else
+	#define PX_NVTX_PUSH(name)
+	#define PX_NVTX_POP()
+#endif
+
+#if PX_SUPPORT_GPU_PHYSX
 	#include "PxDeformableSurface.h"
 	#include "ScDeformableSurfaceSim.h"
 	#include "DyDeformableSurface.h"
@@ -1526,6 +1535,7 @@ void Sc::Scene::releaseConstraints(bool endOfScene)
 
 void Sc::Scene::postNarrowPhase(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:postNarrowPhase");
 	setCollisionPhaseToInactive();
 
 	mHasContactDistanceChanged = false;
@@ -1538,12 +1548,14 @@ void Sc::Scene::postNarrowPhase(PxBaseTask* /*continuation*/)
 
 	PX_PROFILE_STOP_CROSSTHREAD("Basic.narrowPhase", mContextId);
 	PX_PROFILE_STOP_CROSSTHREAD("Basic.collision", mContextId);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::islandGen(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:islandGen");
 	PX_PROFILE_ZONE("Sc::Scene::islandGen", mContextId);
 
 	//mLLContext->runModifiableContactManagers(); //KS - moved here so that we can get up-to-date touch found/lost events in IG
@@ -1559,6 +1571,7 @@ void Sc::Scene::islandGen(PxBaseTask* continuation)
 	// PT: in this version we run postIslandGen directly here in parallel with "islandGen" tasks (rather than just after them).
 	postIslandGen(&mSolver);
 #endif
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1611,6 +1624,7 @@ namespace
 
 void Sc::Scene::processNarrowPhaseTouchEvents(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:processNPTouchEvents");
 	PX_PROFILE_ZONE("Sc::Scene::processNarrowPhaseTouchEvents", mContextId);
 
 	PxsContext* context = mLLContext;
@@ -1671,12 +1685,14 @@ void Sc::Scene::processNarrowPhaseTouchEvents(PxBaseTask* continuation)
 			si->managerNewTouch(0, outputs, useAdaptiveForce);
 		}
 	}*/
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::postIslandGen(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:postIslandGen");
 	PX_PROFILE_ZONE("Sim.postIslandGen", mContextId);
 
 	//
@@ -1720,12 +1736,14 @@ void Sc::Scene::postIslandGen(PxBaseTask* continuation)
 		mNPhaseCore->processTriggerInteractions(*concludingTriggerTask);
 		concludingTriggerTask->removeReference();
 	}
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::setEdgesConnected(PxBaseTask*)
 {
+	PX_NVTX_PUSH("px:setEdgesConnected");
 	PX_PROFILE_ZONE("Sim.preIslandGen.islandTouches", mContextId);
 
 #if USE_SPLIT_SECOND_PASS_ISLAND_GEN
@@ -1760,20 +1778,26 @@ void Sc::Scene::setEdgesConnected(PxBaseTask*)
 
 	wakeObjectsUp();
 #endif
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::solver(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:solver");
 	PX_PROFILE_START_CROSSTHREAD("Basic.rigidBodySolver", mContextId);
 
 #if USE_SPLIT_SECOND_PASS_ISLAND_GEN
 	// PT: we run here the last part of Sc::Scene::setEdgesConnected()
 	// PT: TODO: move to a non solver part?
+	PX_NVTX_PUSH("px:secondPassIslandGenPart2");
 	mSimpleIslandManager->secondPassIslandGenPart2();
+	PX_NVTX_POP();
 
+	PX_NVTX_PUSH("px:wakeObjectsUp");
 	wakeObjectsUp();
+	PX_NVTX_POP();
 #endif
 
 	//Update forces per body in parallel. This can overlap with the other work in this phase.
@@ -1786,6 +1810,7 @@ void Sc::Scene::solver(PxBaseTask* continuation)
 
 	//PxsContactManagerOutputIterator outputs = mLLContext->getNphaseImplementationContext()->getContactManagerOutputs();
 	//mNPhaseCore->processPersistentContactEvents(outputs, continuation);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1932,6 +1957,7 @@ namespace
 
 void Sc::Scene::beforeSolver(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:beforeSolver");
 	PX_PROFILE_ZONE("Sim.updateForces", mContextId);
 
 	// Note: For contact notifications it is important that force threshold checks are done after new/lost touches have been processed
@@ -2026,13 +2052,14 @@ void Sc::Scene::beforeSolver(PxBaseTask* continuation)
 			startTask(task, continuation);
 		}
 	}
-	
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::updateBodies(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:updateBodies");
 	PX_ASSERT(isUsingGpuDynamicsOrBp());	// PT: this is not called anymore in the CPU pipeline
 
 	// AD: need to raise dirty flags serially because the PxgBodySimManager::updateArticulation() is not thread-safe.
@@ -2048,12 +2075,14 @@ void Sc::Scene::updateBodies(PxBaseTask* continuation)
 
 	//dma bodies and articulation data to gpu
 	mSimulationController->updateBodies(continuation);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::updateDynamics(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:updateDynamics");
 	PX_PROFILE_START_CROSSTHREAD("Basic.dynamics", mContextId);
 
 	//Allow processLostContactsTask to run until after 2nd pass of solver completes (update bodies, run sleeping logic etc.)
@@ -2105,10 +2134,12 @@ void Sc::Scene::updateDynamics(PxBaseTask* /*continuation*/)
 
 		updateDynamicsPostPartitioning(&mPostSolver);
 	}
+	PX_NVTX_POP();
 }
 
 void Sc::Scene::updateDynamicsPostPartitioning(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:updateDynPostPart");
 	PX_PROFILE_ZONE("Scene::updateDynamicsPostPartitioning", mContextId);
 
 	{
@@ -2124,6 +2155,7 @@ void Sc::Scene::updateDynamicsPostPartitioning(PxBaseTask* /*continuation*/)
 	mProcessLostContactsTask3.removeReference();
 	mProcessLostContactsTask2.removeReference();
 	mProcessLostContactsTask.removeReference();
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2146,6 +2178,7 @@ static PX_FORCE_INLINE void findInteractions(const NPhaseCore& core, PxU32 count
 
 void Sc::Scene::processLostContacts(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:processLostContacts");
 	PX_PROFILE_ZONE("Sc::Scene::processLostContacts", mContextId);
 
 	// PT: don't bother starting the tasks if we don't need to
@@ -2213,6 +2246,7 @@ void Sc::Scene::processLostContacts(PxBaseTask* continuation)
 			}
 		}
 	}
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2282,6 +2316,7 @@ void Sc::Scene::processNarrowPhaseLostTouchEvents(PxBaseTask*)
 
 void Sc::Scene::processLostContacts2(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:processLostContacts2");
 	PxU32 destroyedOverlapCount;
 	AABBOverlap* PX_RESTRICT p = mAABBManager->getDestroyedOverlaps(ElementType::eSHAPE, destroyedOverlapCount);
 
@@ -2317,6 +2352,7 @@ void Sc::Scene::processLostContacts2(PxBaseTask* continuation)
 	}
 
 	mDestroyManagersTask.removeReference();
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2373,6 +2409,7 @@ void Sc::Scene::unregisterInteractions(PxBaseTask*)
 
 void Sc::Scene::destroyManagers(PxBaseTask*)
 {
+	PX_NVTX_PUSH("px:destroyManagers");
 	PX_PROFILE_ZONE("Sim.destroyManagers", mContextId);
 
 	mPostThirdPassIslandGenTask.setContinuation(mProcessLostContactsTask3.getContinuation());
@@ -2396,12 +2433,14 @@ void Sc::Scene::destroyManagers(PxBaseTask*)
 		}
 		p++;
 	}
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::processLostContacts3(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:processLostContacts3");
 	{
 		PX_PROFILE_ZONE("Sim.processLostOverlapsStage2", mContextId);
 
@@ -2440,6 +2479,7 @@ void Sc::Scene::processLostContacts3(PxBaseTask* /*continuation*/)
 	}
 
 	mPostThirdPassIslandGenTask.removeReference();
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2448,6 +2488,7 @@ void Sc::Scene::processLostContacts3(PxBaseTask* /*continuation*/)
 
 void Sc::Scene::postThirdPassIslandGen(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:postThirdPassIG");
 	PX_PROFILE_ZONE("Sc::Scene::postThirdPassIslandGen", mContextId);
 
 	putObjectsToSleep();
@@ -2489,6 +2530,7 @@ void Sc::Scene::postThirdPassIslandGen(PxBaseTask* /*continuation*/)
 	PxvNphaseImplementationContext*	implCtx = mLLContext->getNphaseImplementationContext();
 	PxsContactManagerOutputIterator outputs = implCtx->getContactManagerOutputs();
 	mNPhaseCore->processPersistentContactEvents(outputs);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2496,6 +2538,7 @@ void Sc::Scene::postThirdPassIslandGen(PxBaseTask* /*continuation*/)
 //This is called after solver finish
 void Sc::Scene::updateSimulationController(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:updateSimCtrl");
 	PX_PROFILE_ZONE("Sim.updateSimulationController", mContextId);
 	
 	PX_ASSERT(isUsingGpuDynamicsOrBp());	// PT: this is not called anymore in the CPU pipeline
@@ -2513,12 +2556,14 @@ void Sc::Scene::updateSimulationController(PxBaseTask* continuation)
 		mDynamicsContext->updateBodyCore(continuation);
 	}
 	//mSimulationController->update(cache, boundArray, changedAABBMgrActorHandles);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::postSolver(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:postSolver");
 	PX_PROFILE_ZONE("Sc::Scene::postSolver", mContextId);
 
 	PxcNpMemBlockPool& blockPool = mLLContext->getNpMemBlockPool();
@@ -2555,12 +2600,14 @@ void Sc::Scene::postSolver(PxBaseTask* /*continuation*/)
 	mDynamicsContext->getExternalRigidAccelerations().clearAll();
 
 	//afterIntegration(continuation);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Sc::Scene::checkForceThresholdContactEvents(PxU32 ccdPass)
 {
+	PX_NVTX_PUSH("px:checkForceThreshold");
 	PX_PROFILE_ZONE("Sim.checkForceThresholdContactEvents", mContextId);
 
 	// Note: For contact notifications it is important that force threshold checks are done after new/lost touches have been processed
@@ -2610,10 +2657,12 @@ void Sc::Scene::checkForceThresholdContactEvents(PxU32 ccdPass)
 			}
 		}
 	}
+	PX_NVTX_POP();
 }
 
 void Sc::Scene::afterIntegration(PxBaseTask* continuation)
 {
+	PX_NVTX_PUSH("px:afterIntegration");
 	PX_PROFILE_ZONE("Sc::Scene::afterIntegration", mContextId);
 
 	mLLContext->getTransformCache().resetChangedState(); //Reset the changed state. If anything outside of the GPU kernels updates any shape's transforms, this will be raised again
@@ -2730,7 +2779,8 @@ void Sc::Scene::afterIntegration(PxBaseTask* continuation)
 
 	PX_PROFILE_STOP_CROSSTHREAD("Basic.dynamics", mContextId);
 
-	checkForceThresholdContactEvents(0); 		
+	checkForceThresholdContactEvents(0);
+	PX_NVTX_POP();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2773,6 +2823,7 @@ void Sc::Scene::fireOnAdvanceCallback()
 
 void Sc::Scene::finalizationPhase(PxBaseTask* /*continuation*/)
 {
+	PX_NVTX_PUSH("px:finalizationPhase");
 	PX_PROFILE_ZONE("Sim.sceneFinalization", mContextId);
 
 	if(mCCDContext)
@@ -2817,6 +2868,7 @@ void Sc::Scene::finalizationPhase(PxBaseTask* /*continuation*/)
 	// VR: do this at finalizationPhase when all contact and
 	// friction impulses and CCD contacts are already computed
 	visualizeContacts();
+	PX_NVTX_POP();
 }
 
 void Sc::Scene::collectSolverResidual()

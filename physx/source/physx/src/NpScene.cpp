@@ -3703,6 +3703,13 @@ void NpScene::setDeformableVolumeGpuPostSolveCallback(PxPostSolveCallback* postS
 	mScene.setDeformableVolumeGpuPostSolveCallback(postSolveCallback);
 }
 
+void NpScene::setSkipHostSync(bool skip)
+{
+	PxsSimulationController* sc = mScene.getSimulationController();
+	if (sc)
+		sc->setSkipHostSync(skip);
+}
+
 // PT: DIRECTGPU: deprecated
 void NpScene::copySoftBodyData(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent)
 {

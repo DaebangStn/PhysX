@@ -229,6 +229,10 @@ void PxgSolverCore::gpuMemDMAbackSolverBodies(float4* solverBodyPool, PxU32 nbSo
 
 	synchronizeStreams(mCudaContext, mStream2, mStream, mIntegrateEvent);
 
+	// Fast path: skip signal kernel when host sync is not needed.
+	if (mGpuContext->getSimulationController()->getSkipHostSync())
+		return;
+
 	CUfunction signalFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::BP_SIGNAL_COMPLETE);
 
 	*mPinnedEvent = 0;

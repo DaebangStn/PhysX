@@ -246,6 +246,9 @@ namespace physx
 		virtual void setEnableOVDCollisionReadback(bool) {}
 		virtual bool getEnableOVDCollisionReadback() const { return false; }
 
+		virtual void setSkipHostSync(bool) {}
+		virtual bool getSkipHostSync() const { return false; }
+
 #if PX_SUPPORT_OMNI_PVD
 		virtual void setOVDCallbacks(PxsSimulationControllerOVDCallbacks& /*ovdCallbacks*/) {}
 #endif

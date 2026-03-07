@@ -783,12 +783,21 @@ void PxgCudaSolverCore::gpuMemDMAbackSolverData(PxU8* forceBufferPool, PxU32 for
 void PxgCudaSolverCore::syncDmaBack(PxU32& nbChangedThresholdElements)
 {
 	PX_PROFILE_ZONE("GpuDynamics.DMABackBodies.Sync", 0);
+
+	// Fast path: no signal kernel was launched, so nothing to wait for.
+	if (mGpuContext->getSimulationController()->getSkipHostSync())
+	{
+		nbChangedThresholdElements = 0;
+		mNbPrevExceededForceElements = 0;
+		return;
+	}
+
 	mCudaContextManager->acquireContext();
 	//Wait for mStream to have completed
 	/*CUresult result = mCudaContext->streamSynchronize(mStream);
 	PX_UNUSED(result);
 	PX_ASSERT(result == CUDA_SUCCESS);*/
-		
+
 	volatile PxU32* pEvent = mPinnedEvent;
 	if (!spinWait(*pEvent, 0.1f))
 		mCudaContext->streamSynchronize(mStream);

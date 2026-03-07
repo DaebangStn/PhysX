@@ -46,6 +46,7 @@
 #include "CmCollection.h"
 #include "PxsSimulationController.h"
 #include "common/PxProfileZone.h"
+#include <nvtx3/nvToolsExt.h>
 #include "BpBroadPhase.h"
 #include "BpAABBManagerBase.h"
 #include "omnipvd/NpOmniPvdSetData.h"
@@ -138,6 +139,7 @@ void NpScene::fetchResultsPreContactCallbacks()
 
 void NpScene::fetchResultsPostContactCallbacks()
 {
+	nvtxRangePush("px:postCB_bodyAccels");
 	// PT: I put this here for now, as initially we even considered making this a PxExtensions helper. To make it more
 	// efficient / multithread it we could eventually move this deeper in the Sc-level pipeline.
 	if((mScene.getFlags() & PxSceneFlag::eENABLE_BODY_ACCELERATIONS) && !(mScene.getFlags() & PxSceneFlag::eENABLE_DIRECT_GPU_API))
@@ -184,9 +186,15 @@ void NpScene::fetchResultsPostContactCallbacks()
 		}
 	}
 
-	mScene.postCallbacksPreSync();
+	nvtxRangePop();
 
+	nvtxRangePush("px:postCB_preSync");
+	mScene.postCallbacksPreSync();
+	nvtxRangePop();
+
+	nvtxRangePush("px:postCB_syncSQ");
 	syncSQ();
+	nvtxRangePop();
 
 #if PX_SUPPORT_PVD
 	mScenePvdClient.updateSceneQueries();
@@ -195,26 +203,34 @@ void NpScene::fetchResultsPostContactCallbacks()
 #endif
 
 	// fire sleep and wake-up events
+	nvtxRangePush("px:postCB_fireCallbacksPostSync");
 	{
 		PX_PROFILE_ZONE("Sim.fireCallbacksPostSync", getContextId());
 		mScene.fireCallbacksPostSync();
 	}
+	nvtxRangePop();
 
+	nvtxRangePush("px:postCB_postReportsCleanup");
 	mScene.postReportsCleanup();
+	nvtxRangePop();
 
 	// build the list of active actors
+	nvtxRangePush("px:postCB_buildActiveActors");
 	{
 		PX_PROFILE_ZONE("Sim.buildActiveActors", getContextId());
 
 		const bool buildActiveActors = (mScene.getFlags() & PxSceneFlag::eENABLE_ACTIVE_ACTORS) || OMNI_PVD_ACTIVE;
-		
+
 		if (buildActiveActors && mBuildFrozenActors)
 			mScene.buildActiveAndFrozenActors();
 		else if (buildActiveActors)
 			mScene.buildActiveActors();
 	}
+	nvtxRangePop();
 
+	nvtxRangePush("px:postCB_renderBuffer");
 	mRenderBuffer.append(mScene.getRenderBuffer());
+	nvtxRangePop();
 
 	PX_ASSERT(getSimulationStage() != Sc::SimulationStage::eCOMPLETE);
 	if (mControllingSimulation)
@@ -235,8 +251,10 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 	if(getSimulationStage() != Sc::SimulationStage::eADVANCE)
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__, "PxScene::fetchResults: fetchResults() called illegally! It must be called after advance() or simulate()");
 
+	nvtxRangePush("px:waitPhysicsDone");
 	if(!checkResultsInternal(block)) // this should wait on the mPhysicsDone event, which is set in the SceneCompletion task
 		return false;
+	nvtxRangePop();
 
 
 #if PX_SUPPORT_GPU_PHYSX
@@ -247,7 +265,7 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 	PX_SIMD_GUARD;
 
 	{
-		// take write check *after* simulation has finished, otherwise 
+		// take write check *after* simulation has finished, otherwise
 		// we will block simulation callbacks from using the API
 		// disallow re-entry to detect callbacks making write calls
 		NP_WRITE_CHECK_NOREENTRY(this);
@@ -257,7 +275,9 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 		PX_PROFILE_START_CROSSTHREAD("Basic.fetchResults", getContextId());
 		PX_PROFILE_ZONE("Sim.fetchResults", getContextId());
 
+		nvtxRangePush("px:fetchResultsPreContactCallbacks");
 		fetchResultsPreContactCallbacks();
+		nvtxRangePop();
 
 		{
 			// PT: TODO: why a cross-thread event here?
@@ -266,7 +286,9 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 			PX_PROFILE_STOP_CROSSTHREAD("Basic.processCallbacks", getContextId());
 		}
 
+		nvtxRangePush("px:fetchResultsPostContactCallbacks");
 		fetchResultsPostContactCallbacks();
+		nvtxRangePop();
 	
 		PX_PROFILE_STOP_CROSSTHREAD("Basic.fetchResults", getContextId());
 		PX_PROFILE_STOP_CROSSTHREAD("Basic.simulate", getContextId());

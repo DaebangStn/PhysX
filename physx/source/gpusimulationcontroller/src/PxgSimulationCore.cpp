@@ -590,6 +590,9 @@ void PxgSimulationCore::createGpuStreamsAndEvents()
 	//create event
 	mCudaContext->eventCreate(&mDmaEvent, CU_EVENT_DISABLE_TIMING);
 
+	// cross-step sync event: recorded on mStream, waited on BP stream
+	mCudaContext->eventCreate(&mStepCompleteEvent, CU_EVENT_DISABLE_TIMING);
+
 	mPinnedEvent = PX_PINNED_MEMORY_ALLOC(PxU32, *mCudaContextManager, 1);
 }
 
@@ -606,6 +609,9 @@ void PxgSimulationCore::releaseGpuStreamsAndEvents()
 	//destroy event
 	mCudaContext->eventDestroy(mDmaEvent);
 	mDmaEvent = NULL;
+
+	mCudaContext->eventDestroy(mStepCompleteEvent);
+	mStepCompleteEvent = NULL;
 
 	PX_PINNED_MEMORY_FREE(*mCudaContextManager, mPinnedEvent);
 }
@@ -2117,8 +2123,16 @@ void PxgSimulationCore::gpuMemDmaUpParticleSystem(PxgBodySimManager& bodySimMana
 void PxgSimulationCore::mergeChangedAABBMgHandle()
 {
 	// AD: the scary thing here is that we initialized this during the previous sim step, so the pointers could all be wrong?
-	
+
 	CUstream stream = mGpuContext->getGpuBroadPhase()->getBpStream();
+
+	// When skipHostSync is active, the CPU-side spinWait barrier between steps is removed.
+	// Ensure BP stream waits for previous step's mStream work (update kernels that write
+	// changedAABBMgrHandles / bounds / transform cache) before reading them.
+	if (mGpuContext->getSimulationController()->getSkipHostSync())
+	{
+		mCudaContext->streamWaitEvent(stream, mStepCompleteEvent);
+	}
 
 	CUdeviceptr updatedActorDescd = mUpdatedActorDescBuffer.getDevicePtr();
 	CUfunction kernelFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::MERGE_AABBMGR_HANDLES);
@@ -2217,6 +2231,23 @@ void PxgSimulationCore::gpuMemDmaBack(PxInt32ArrayPinned& frozenArray,
 	bool enableDirectGPUAPI)
 {
 	PX_PROFILE_ZONE("GpuSimulationController.gpuMemDmaBack", 0);
+
+	// Fast path: skip DMA copies and signal kernel when host sync is not needed.
+	// Record an event on mStream so the next step's broadphase can wait for it
+	// (cross-stream ordering replacement for the spinWait barrier).
+	const bool skipHostSync = mGpuContext->getSimulationController()->getSkipHostSync();
+	if (skipHostSync)
+	{
+		if (enableDirectGPUAPI)
+		{
+			PxgBoundsArray& directGPUBoundsArray = static_cast<PxgBoundsArray&>(boundArray);
+			directGPUBoundsArray.resetChanges();
+		}
+		// Record event for cross-step cross-stream sync (replaces signal kernel + spinWait)
+		mCudaContext->eventRecord(mStepCompleteEvent, mStream);
+		return;
+	}
+
 	PxBoundsArrayPinned& bounds = boundArray.getBounds();
 	PxU32 boundCapacity = bounds.size();
 
@@ -2231,7 +2262,7 @@ void PxgSimulationCore::gpuMemDmaBack(PxInt32ArrayPinned& frozenArray,
 		mCudaContext->memcpyDtoHAsync(frozenArray.begin(), mFrozenBlockAndResBuffer.getDevicePtr(), sizeof(PxU32)*numShapes, mStream);
 		mCudaContext->memcpyDtoHAsync(unfrozenArray.begin(), mUnfrozenBlockAndResBuffer.getDevicePtr(), sizeof(PxU32)*numShapes, mStream);
 	}
-	
+
 	// AD safety if the copies above fail.
 	// Fine to do sync because we never dispatch the copies if we abort.
 	if (mCudaContext->isInAbortMode())
@@ -2248,7 +2279,7 @@ void PxgSimulationCore::gpuMemDmaBack(PxInt32ArrayPinned& frozenArray,
 
 
 	if(!mGpuContext->getEnableDirectGPUAPI())
-	{	
+	{
 		CUdeviceptr boundsd = mUseGpuBp ? mGpuContext->mGpuBp->getBoundsBuffer().getDevicePtr() : mBoundsBuffer.getDevicePtr();
 		mCudaContext->memcpyDtoHAsync(bounds.begin(), boundsd, sizeof(PxBounds3)*boundCapacity, mStream);
 		mCudaContext->memcpyDtoHAsync(cachedTransform->begin(), mGpuContext->mGpuNpCore->getTransformCache().getDevicePtr(), sizeof(PxsCachedTransform)*cachedCapacity, mStream);
@@ -2265,7 +2296,7 @@ void PxgSimulationCore::gpuMemDmaBack(PxInt32ArrayPinned& frozenArray,
 	CUdeviceptr changeAABBHandlesd = mUseGpuBp ? mGpuContext->getGpuBroadPhase()->getAABBManager()->getChangedAABBMgrHandles() : mChangedAABBMgrHandlesBuffer.getDevicePtr();
 	mCudaContext->memcpyDtoHAsync(changedAABBMgrHandles.getWords(), changeAABBHandlesd, sizeof(PxU32)*changedAABBMgrHandles.getWordCount(), mStream);
 
-	
+
 	*mPinnedEvent = 0;
 
 	CUfunction signalFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::BP_SIGNAL_COMPLETE);
@@ -2292,13 +2323,24 @@ void PxgSimulationCore::syncDmaback(PxU32& nbFrozenShapesThisFrame, PxU32& nbUnf
 {
 	PX_PROFILE_ZONE("PxgSimulationCore::syncDmaBack", 0);
 
+	// Fast path: skip DtoH copies and signal kernel, but wait for GPU completion.
+	// mStepCompleteEvent was recorded on mStream in gpuMemDmaBack, so this
+	// preserves the fetchResults(true) contract: all simulation work is done on return.
+	if (mGpuContext->getSimulationController()->getSkipHostSync())
+	{
+		mCudaContext->eventSynchronize(mStepCompleteEvent);
+		nbFrozenShapesThisFrame = 0;
+		nbUnfrozenShapesThisFrame = 0;
+		return;
+	}
+
 	//make sure all the data has been back to cpu
 	//mCudaContext->streamSynchronize(mStream);
 
 	if (didSimulate)
 	{
 		volatile PxU32* pEvent = mPinnedEvent;
-			
+
 		if (!spinWait(*pEvent, 0.1f))
 			mCudaContext->streamSynchronize(mStream);
 	}

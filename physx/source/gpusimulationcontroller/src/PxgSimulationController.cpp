@@ -60,6 +60,7 @@
 #include "PxArticulationTendonData.h"
 #include "foundation/PxErrors.h"
 #include "foundation/PxFoundation.h"
+#include <nvtx3/nvToolsExt.h>
 #include "foundation/PxMathUtils.h"
 #include "GuDistancePointTetrahedron.h"
 #include "PxgSimulationCoreDesc.h"
@@ -198,7 +199,8 @@ namespace physx
 		mCollisionStackSizeBytes(collisionStackSizeBytes),
 		mRecomputeArticulationBlockFormat(false),
 		mEnableOVDReadback(false),
-		mEnableOVDCollisionReadback(false)
+		mEnableOVDCollisionReadback(false),
+		mSkipHostSync(false)
 #if PX_SUPPORT_OMNI_PVD
 		,mOvdCallbacks(NULL)
 #endif
@@ -2890,10 +2892,13 @@ namespace physx
 		PX_UNUSED(cache);
 		PX_UNUSED(boundArray);
 
+		nvtxRangePush("px:updateScBodyAndShapeSim");
 		PX_PROFILE_ZONE("GpuSimulationController.updateScBodyAndShapeSim", 0);
 
 		mCudaContextManager->acquireContext();
+		nvtxRangePush("px:syncDmaback");
 		mSimulationCore->syncDmaback(mNbFrozenShapes, mNbUnfrozenShapes, mHasBeenSimulated);
+		nvtxRangePop();
 		if (mFEMClothCore)
 			mFEMClothCore->syncCloths();
 		if (mSoftBodyCore)
@@ -2926,6 +2931,7 @@ namespace physx
 		}
 
 		mCudaContextManager->releaseContext();
+		nvtxRangePop();
 	}
 
 	PxU32* PxgSimulationController::getActiveBodies()
@@ -4412,6 +4418,17 @@ namespace physx
 	{
 		return mEnableOVDCollisionReadback;
 	}
+
+	void PxgSimulationController::setSkipHostSync(bool skip)
+	{
+		mSkipHostSync = skip;
+	}
+
+	bool PxgSimulationController::getSkipHostSync() const
+	{
+		return mSkipHostSync;
+	}
+
 #if PX_SUPPORT_OMNI_PVD
 	void PxgSimulationController::setOVDCallbacks(PxsSimulationControllerOVDCallbacks& ovdCallbacks)
 	{

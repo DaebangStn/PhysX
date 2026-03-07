@@ -575,7 +575,8 @@ namespace physx
 
 		CUstream		mStream;
 		CUevent			mEvent;
-		CUevent			mDmaEvent; 
+		CUevent			mDmaEvent;
+		CUevent			mStepCompleteEvent;	// cross-step sync: recorded on mStream after update kernels, waited on BP stream
 	
 		PxVec3			mGravity;
 

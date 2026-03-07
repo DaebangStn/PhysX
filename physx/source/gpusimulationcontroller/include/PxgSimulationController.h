@@ -705,6 +705,9 @@ namespace physx
 		virtual void setEnableOVDCollisionReadback(bool enableOVDCollisionsReadback) PX_OVERRIDE;
 		virtual bool getEnableOVDCollisionReadback() const PX_OVERRIDE;
 
+		virtual void setSkipHostSync(bool skip) PX_OVERRIDE;
+		virtual bool getSkipHostSync() const PX_OVERRIDE;
+
 #if PX_SUPPORT_OMNI_PVD
 		virtual void setOVDCallbacks(PxsSimulationControllerOVDCallbacks& ovdCallbacks) PX_OVERRIDE;
 		PX_FORCE_INLINE PxsSimulationControllerOVDCallbacks* getOVDCallbacks() { return mOvdCallbacks; }
@@ -888,6 +891,7 @@ namespace physx
 		bool 													mRecomputeArticulationBlockFormat;
 		bool													mEnableOVDReadback;
 		bool													mEnableOVDCollisionReadback;
+		bool													mSkipHostSync;
 #if PX_SUPPORT_OMNI_PVD
 		PxsSimulationControllerOVDCallbacks*					mOvdCallbacks;
 #endif

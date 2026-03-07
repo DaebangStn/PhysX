@@ -645,6 +645,11 @@ void NpScene::syncSQ()
 {
 	PxSceneQuerySystem& pm = getSQAPI();
 
+	// Fast path: skip all SQ sync work when updates are fully disabled.
+	// This avoids iterating dirty shapes/compounds when no queries are used.
+	if(pm.getUpdateMode() == PxSceneQueryUpdateMode::eBUILD_DISABLED_COMMIT_DISABLED)
+		return;
+
 	{
 		const PxU32 numBodies = mScene.getNumActiveCompoundBodies();
 		const Sc::BodyCore*const* bodies = mScene.getActiveCompoundBodiesArray();

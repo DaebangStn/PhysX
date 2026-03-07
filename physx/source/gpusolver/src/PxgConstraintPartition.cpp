@@ -25,6 +25,7 @@
 // Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
 
 #include "common/PxProfileZone.h"
+#include <nvtx3/nvToolsExt.h>
 
 #include "PxgConstraintPartition.h"
 #include "PxcNpWorkUnit.h"
@@ -1048,6 +1049,7 @@ void PxgIncrementalPartition::processLostFoundPatches(	Cm::FlushPool& flushPool,
 														IG::IslandSim& islandSim, PxgBodySimManager& bodySimManager, PxgJointManager& jointManager,
 														PxsContactManager** lostFoundPatchManagers, PxU32 nbLostFoundPatchManagers, const PxsContactManagerOutputCounts* lostFoundPairOutputs)
 {
+	nvtxRangePush("px:processLostFoundPatches");
 #if USE_SPLIT_SECOND_PASS_ISLAND_GEN
 	// PT: this copy is necessary when running postIslandGen in parallel with this function. Specifically
 	// Sc::Scene::setEdgesConnected will call mSimpleIslandManager->setEdgeConnected and mSimpleIslandManager->secondPassIslandGenPart1
@@ -1074,6 +1076,7 @@ void PxgIncrementalPartition::processLostFoundPatches(	Cm::FlushPool& flushPool,
 		ProcessPatchesTask* task = PX_PLACEMENT_NEW(flushPool.allocate(sizeof(ProcessPatchesTask)), ProcessPatchesTask)(mContextID, *this, islandSim, lostFoundPatchManagers, nbLostFoundPatchManagers, lostFoundPairOutputs, bodySimManager, jointManager);
 		startTask(task, continuation);
 	}
+	nvtxRangePop();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1128,6 +1131,7 @@ namespace
 
 		virtual void runInternal()	PX_OVERRIDE	PX_FINAL
 		{
+			nvtxRangePush("px:partPreprocess");
 			PX_ASSERT(mContext.mIslandSim.mGpuData);
 			IG::GPUExternalData& islandSimGpuData = *mContext.mIslandSim.mGpuData;
 
@@ -1269,6 +1273,7 @@ namespace
 			// PT: one atomic add to update the data we accumulated locally. Note the minus sign, as we don't have PxAtomicSub.
 			if(localNbForceThresholds)
 				PxAtomicAdd(reinterpret_cast<volatile PxI32*>(&mContext.mIP.mNbForceThresholds), -localNbForceThresholds);
+			nvtxRangePop();
 		}
 	};
 
@@ -1289,6 +1294,7 @@ namespace
 
 		virtual void runInternal()	PX_OVERRIDE	PX_FINAL
 		{
+			nvtxRangePush("px:partRemoveSpecial");
 			PxgBodySimManager& bodySimManager = mContext.mBodySimManager;
 
 			// PT: go over batched data sequentially in a single task, but at least in a separate thread. Better than nothing.
@@ -1315,6 +1321,7 @@ namespace
 
 				currentTask = nextTask;
 			}
+			nvtxRangePop();
 		}
 	};
 
@@ -1353,6 +1360,7 @@ namespace
 
 		virtual void runInternal()	PX_OVERRIDE	PX_FINAL
 		{
+			nvtxRangePush(gTaskNames[mCodepath]);
 			parse();
 
 			if(mCodepath==DESTROY_EDGES_PROCESS_FOUND_PATCHES)
@@ -1366,6 +1374,7 @@ namespace
 				mContext.mIP.processFoundPatches_Reference(mContext.mIslandSim, mContext.mBodySimManager,
 					mContext.mLostFoundPatchManagers, mContext.mNbLostFoundPatchManagers, mContext.mLostFoundPairOutputs);
 			}
+			nvtxRangePop();
 		}
 
 		void parse()
@@ -1528,6 +1537,7 @@ namespace
 
 		virtual void runInternal()	PX_OVERRIDE	PX_FINAL
 		{
+			nvtxRangePush("px:partEpilogue");
 			Cm::FlushPool& flushPool = mContext.mFlushPool;
 
 			ControlTask* removeEdgesFromPartitionsTask = PX_PLACEMENT_NEW(flushPool.allocate(sizeof(ControlTask)), ControlTask)(mContextID, mContext, REMOVE_EDGES_FROM_PARTITIONS);
@@ -1559,6 +1569,7 @@ namespace
 
 			removeSerialContinuationTask->removeReference();
 
+			nvtxRangePop();
 		}
 	};
 }
@@ -1869,7 +1880,9 @@ namespace
 	
 		virtual void runInternal()	PX_OVERRIDE	PX_FINAL
 		{
+			static const char* names[] = { "px:uii_ref", "px:uii_1+2_0", "px:uii_2_1", "px:uii_2_2+3", "px:uii_2_2_cm", "px:uii_2_2_ec", "px:uii_2_2_ll", "px:uii_3" };
 			const Codepath codepath = mCodepath;
+			nvtxRangePush(names[codepath]);
 			if(codepath == REFERENCE_VERSION)
 			{
 				mIncrementalPartition.updateIncrementalIslands_Reference(mIslandSim, mIslandManagerData, mIterator, mBodySimManager, mJointManager);
@@ -1907,6 +1920,7 @@ namespace
 				mIncrementalPartition.updateIncrementalIslands_Part2_2_ProcessEdgeCases(mIslandSim);
 				mIncrementalPartition.updateIncrementalIslands_Part3(mIslandSim, mJointManager);
 			}
+			nvtxRangePop();
 		}
 	};
 
