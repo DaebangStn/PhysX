@@ -28,7 +28,7 @@
 
 #include "PxgContext.h"
 #include "cudamanager/PxCudaContext.h"
-#include <nvtx3/nvToolsExt.h>
+#include "CmNvtx.h"
 #include "common/PxProfileZone.h"
 #include "PxgIslandContext.h"
 #include "PxgSolverCore.h"

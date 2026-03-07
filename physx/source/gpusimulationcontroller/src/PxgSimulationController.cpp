@@ -60,7 +60,7 @@
 #include "PxArticulationTendonData.h"
 #include "foundation/PxErrors.h"
 #include "foundation/PxFoundation.h"
-#include <nvtx3/nvToolsExt.h>
+#include "CmNvtx.h"
 #include "foundation/PxMathUtils.h"
 #include "GuDistancePointTetrahedron.h"
 #include "PxgSimulationCoreDesc.h"

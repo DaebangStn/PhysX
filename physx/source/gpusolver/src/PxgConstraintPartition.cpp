@@ -25,7 +25,7 @@
 // Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
 
 #include "common/PxProfileZone.h"
-#include <nvtx3/nvToolsExt.h>
+#include "CmNvtx.h"
 
 #include "PxgConstraintPartition.h"
 #include "PxcNpWorkUnit.h"

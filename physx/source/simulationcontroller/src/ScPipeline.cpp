@@ -50,14 +50,9 @@
 #include "ScShapeInteraction.h"
 #include "ScElementInteractionMarker.h"
 
-#if PX_SUPPORT_GPU_PHYSX
-	#include <nvtx3/nvToolsExt.h>
-	#define PX_NVTX_PUSH(name) nvtxRangePush(name)
-	#define PX_NVTX_POP()      nvtxRangePop()
-#else
-	#define PX_NVTX_PUSH(name)
-	#define PX_NVTX_POP()
-#endif
+#include "CmNvtx.h"
+#define PX_NVTX_PUSH(name) nvtxRangePush(name)
+#define PX_NVTX_POP()      nvtxRangePop()
 
 #if PX_SUPPORT_GPU_PHYSX
 	#include "PxDeformableSurface.h"

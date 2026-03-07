@@ -46,7 +46,7 @@
 #include "CmCollection.h"
 #include "PxsSimulationController.h"
 #include "common/PxProfileZone.h"
-#include <nvtx3/nvToolsExt.h>
+#include "CmNvtx.h"
 #include "BpBroadPhase.h"
 #include "BpAABBManagerBase.h"
 #include "omnipvd/NpOmniPvdSetData.h"
