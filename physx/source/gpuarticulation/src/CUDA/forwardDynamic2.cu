@@ -3145,6 +3145,15 @@ extern "C" __global__ void updateBodiesLaunch_Part2(
 				loadSpatialMatrix(linkData[linkIndex].mSpatialArticulatedInertia, threadIndexInWarp, linkSpatialInertiaW);
 				const Cm::SpatialVectorF linkSpatialDeltaVelW = loadSpatialVectorF(linkData[linkIndex].mSolverSpatialDeltaVel, threadIndexInWarp);
 				const Cm::SpatialVectorF linkSpatialImpulseW = loadSpatialVectorF(linkData[linkIndex].mSolverSpatialImpulse, threadIndexInWarp);
+
+				// Save constraint impulse as spatial force for eCONSTRAINT_GENERALIZED_FORCES API (1-step lag).
+				// Field-by-field assignment avoids SpatialVectorF (32 bytes) vs UnAlignedSpatialVector (24 bytes) layout mismatch.
+				if (articulation.constraintSpatialForces)
+				{
+					articulation.constraintSpatialForces[linkIndex].top    = linkSpatialImpulseW.top    * invDt;
+					articulation.constraintSpatialForces[linkIndex].bottom = linkSpatialImpulseW.bottom * invDt;
+				}
+
 				const PxTransform Gc = loadSpatialTransform(linkData[linkIndex].mAccumulatedPose, threadIndexInWarp);		
 				const PxTransform Lc = loadSpatialTransform(linkData[linkIndex].mChildPose, threadIndexInWarp);
 				const PxTransform GcLc = Gc*Lc;

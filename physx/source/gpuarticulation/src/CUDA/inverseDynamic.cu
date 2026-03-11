@@ -798,6 +798,101 @@ extern "C" __global__ void computeArtiGravityForces(
 	}
 }
 
+// Computes generalized constraint forces (contacts, joint limits, tendons) from per-link
+// constraint spatial impulses captured during the previous simulate() step (1-step lag).
+// Output layout identical to computeArtiGravityForces: (maxDofs + 6) floats per articulation.
+// Root force at offsets 0-5; joint DOFs at offsets 6..6+dofCount.
+// We process one articulation per warp (32 threads).
+extern "C" __global__ void computeArtiConstraintForces(
+	const PxU32 nbIndices,
+	float* PX_RESTRICT data,
+	const PxArticulationGPUIndex* PX_RESTRICT gpuIndices,
+	const PxU32 maxDofs,
+	const bool rootMotion,
+	const PxgArticulation* articulations)
+{
+	const PxU32 jobIndex = threadIdx.y + blockIdx.x * blockDim.y;
+	const PxU32 threadIndex = threadIdx.x;
+
+	if (jobIndex < nbIndices)
+	{
+		const PxU32 artiIndex = gpuIndices[jobIndex];
+		const PxgArticulation& arti = articulations[artiIndex];
+
+		const PxU32 linkCount = arti.data.numLinks;
+		const PxU32 dofCount = arti.data.numJointDofs;
+		const bool fixBase = arti.data.flags & PxArticulationFlag::eFIX_BASE;
+		const PxU32 rootDof = (rootMotion && !fixBase) ? 6 : 0;
+		const PxU32 bufferDof = rootMotion ? 6 : 0;
+
+		float* PX_RESTRICT gravityCompensationForces = &data[jobIndex * (maxDofs + bufferDof)];
+
+		if (rootMotion || fixBase)
+		{
+			// I use this as a tmp buffer to store ZAForce vectors of all links
+			Cm::UnAlignedSpatialVector* PX_RESTRICT zAForces = reinterpret_cast<Cm::UnAlignedSpatialVector*>(arti.zAForces); // ???
+
+			// Init from per-link constraint spatial forces (captured from previous simulate()).
+			for (PxU32 link = threadIndex; link < linkCount; link += WARP_SIZE)
+			{
+				if (arti.constraintSpatialForces)
+					zAForces[link] = arti.constraintSpatialForces[link];
+				else
+					zAForces[link] = Cm::UnAlignedSpatialVector(PxVec3(0.f), PxVec3(0.f));
+			}
+
+			__syncwarp();
+
+			for (PxU32 link = (linkCount - 1); link > 0; --link)
+			{
+				const PxTransform& body2World = arti.linkBody2Worlds[link];
+				const PxU32 parentLink = arti.parents[link];
+				const PxTransform& parentBody2World = arti.linkBody2Worlds[parentLink];
+
+				if (threadIndex == 0)
+					zAForces[parentLink] += translateSpatialVector(body2World.p - parentBody2World.p, zAForces[link]);
+
+				const ArticulationJointCoreData& jointData = arti.jointData[link];
+				PxReal* force = &gravityCompensationForces[jointData.jointOffset];
+
+				if (threadIndex < jointData.nbDof)
+					force[threadIndex + rootDof] = link; // I'll just store dof's link index here and use it in the next loop
+			}
+
+			__syncwarp();
+
+			for (PxU32 dof = threadIndex; dof < dofCount; dof += WARP_SIZE)
+			{
+				PxU32 link = (PxU32)gravityCompensationForces[dof + rootDof];
+				const ArticulationJointCoreData& jointData = arti.jointData[link];
+				const PxTransform& body2World = arti.linkBody2Worlds[link];
+				Cm::UnAlignedSpatialVector dofMotion = arti.motionMatrix[link][dof - jointData.jointOffset].rotate(body2World);
+				gravityCompensationForces[dof + rootDof] = dofMotion.innerProduct(zAForces[link]);
+			}
+
+			// Add root DoFs contribution
+			if (threadIndex == 0 && rootDof == 6)
+			{
+				gravityCompensationForces[0] = zAForces[0].top.x;
+				gravityCompensationForces[1] = zAForces[0].top.y;
+				gravityCompensationForces[2] = zAForces[0].top.z;
+				gravityCompensationForces[3] = zAForces[0].bottom.x;
+				gravityCompensationForces[4] = zAForces[0].bottom.y;
+				gravityCompensationForces[5] = zAForces[0].bottom.z;
+			}
+
+			__syncwarp();
+		}
+		else
+		{
+			// Non-rootMotion fixed-base path: not used for SPD. Zero-initialize output.
+			for (PxU32 dof = threadIndex; dof < dofCount; dof += WARP_SIZE)
+				gravityCompensationForces[dof] = 0.f;
+			__syncwarp();
+		}
+	}
+}
+
 // This is an optimized port of FeatherstoneArticulation::getCoriolisAndCentrifugalForce.
 // We process one articulation per warp (32 threads).
 extern "C" __global__ void computeArtiCentrifugalForces(

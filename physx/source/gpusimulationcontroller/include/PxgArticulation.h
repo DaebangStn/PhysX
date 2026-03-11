@@ -689,7 +689,9 @@ namespace physx
 		Cm::UnAlignedSpatialVector*				linkIncomingJointForces;	
 		Cm::UnAlignedSpatialVector*				corioliseVectors;				
 		Cm::UnAlignedSpatialVector*				zAForces; // used as temporary propagation buffer in inverseDynamics and to store TGS per substep isolated forces while the solver runs. Not cleared after use.
-		
+
+		Cm::UnAlignedSpatialVector*				constraintSpatialForces; // per-link constraint impulse (contacts, limits, tendons) as spatial force (world frame, 1-step lag).
+
 		Cm::UnAlignedSpatialVector*				externalAccelerations;			
 
 		Cm::UnAlignedSpatialVector*				rootPreMotionVelocity;
@@ -915,7 +917,8 @@ namespace physx
 		PxgTypedCudaBuffer<Dy::ArticulationJointCore>			joints;
 		PxgTypedCudaBuffer<Dy::ArticulationJointCoreData>		jointData;
 		PxgTypedCudaBuffer<Cm::UnAlignedSpatialVector>			corioliseVectors;       //link coriolise vector
-		PxgTypedCudaBuffer<Cm::UnAlignedSpatialVector>			zAForces;               //link spatial zero acceleration force/ spatical articulate 
+		PxgTypedCudaBuffer<Cm::UnAlignedSpatialVector>			zAForces;               //link spatial zero acceleration force/ spatical articulate
+		PxgTypedCudaBuffer<Cm::UnAlignedSpatialVector>			constraintSpatialForces; // per-link constraint impulse as spatial force (1-step lag, for eCONSTRAINT_GENERALIZED_FORCES)
 		PxgTypedCudaBuffer<PxU32>								pathToRoots;            //global array store path to root for each link in continuous. Each link should have a start index and numberOfElems
 
 		PxgTypedCudaBuffer<PxGpuSpatialTendonData>				spatialTendonParams;

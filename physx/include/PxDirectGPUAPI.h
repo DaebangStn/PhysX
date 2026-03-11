@@ -196,7 +196,7 @@ public:
         eARTICULATION_COMS_ROOT_FRAME,			//!< Computes the articulation's center of mass in the root frame for the given articulation pose.
 												//!< This is the batched, direct-GPU equivalent to PxArticulationReducedCoordinate::computeArticulationCOM(). The output data
 												//!< buffer is laid out into sequential blocks per articulation, where each block has the size sizeof(float) * 3.
-		eCENTROIDAL_MOMENTUM_MATRICES			//!< Computes the centroidal momentum matrix and bias force for a floating-base articulation.
+		eCENTROIDAL_MOMENTUM_MATRICES,			//!< Computes the centroidal momentum matrix and bias force for a floating-base articulation.
 												//!< This is the batched, direct-GPU equivalent to PxArticulationReducedCoordinate::computeCentroidalMomentumMatrix(). The data buffer is laid
 												//!< out into four main blocks. The two first blocks correspond to the input (mass matrix, Coriolis and Centrifugal compensation force),
 												//!< and the two last blocks correspond to the output (centroidal momentum matrix, bias force). Each block must be organized into sequential
@@ -206,6 +206,11 @@ public:
 												//!< and can be queried by calling PxDirectGPUAPI::getArticulationGPUAPIMaxCounts(). The size of the actual data in each subblock can vary by
 												//!< articulation, and will depend on the value of dofCount. The dof indices will be according to the low-level indexing, we refer to
 												//!< the documentation of PxArticulationCache for an explanation.
+	eCONSTRAINT_GENERALIZED_FORCES		//!< Returns the generalized constraint forces (contacts, joint limits, tendons)
+										//!< from the previous simulation step, projected to generalized coordinates.
+										//!< Output layout: (maxDofs + 6) * sizeof(float) per articulation.
+										//!< Root force at offsets 0-5; joint DOFs at offsets 6..6+dofCount.
+										//!< NOTE: 1-step lag (values from previous simulate()). Zero before first simulate().
 	};
 };
 

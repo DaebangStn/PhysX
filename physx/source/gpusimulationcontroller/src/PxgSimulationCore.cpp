@@ -91,6 +91,7 @@ PxgArticulationBuffer::PxgArticulationBuffer(PxgHeapMemoryAllocatorManager* heap
 	jointData(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
 	corioliseVectors(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
 	zAForces(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
+	constraintSpatialForces(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
 	pathToRoots(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
 	spatialTendonParams(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
 	spatialTendons(heapMemoryManager, PxsHeapStats::eSIMULATION_ARTICULATION),
@@ -842,6 +843,10 @@ void PxgSimulationCore::gpuMemDmaUpBodySim(PxPinnedArray<PxgBodySimVelocityUpdat
 			const PxU32 linkSize = sizeof(Cm::UnAlignedSpatialVector) * numLinks;
 			buffer->corioliseVectors.allocate(linkSize, PX_FL);
 			buffer->zAForces.allocate(linkSize, PX_FL);
+			buffer->constraintSpatialForces.allocate(linkSize, PX_FL);
+			mCudaContext->memsetD32Async(
+				CUdeviceptr(buffer->constraintSpatialForces.getDevicePtr()),
+				0, linkSize / sizeof(PxU32), mStream);
 
 			buffer->externalAccelerations.allocate(linkSize, PX_FL);
 
@@ -908,6 +913,7 @@ void PxgSimulationCore::gpuMemDmaUpBodySim(PxPinnedArray<PxgBodySimVelocityUpdat
 			newArticulation.corioliseVectors = buffer->corioliseVectors.getTypedPtr();
 			newArticulation.externalAccelerations = buffer->externalAccelerations.getTypedPtr();
 			newArticulation.zAForces = buffer->zAForces.getTypedPtr();
+			newArticulation.constraintSpatialForces = buffer->constraintSpatialForces.getTypedPtr();
 
 			newArticulation.jointTargetPositions = buffer->jointTargetPositions.getTypedPtr();
 			newArticulation.jointTargetVelocities = buffer->jointTargetVelocities.getTypedPtr();
