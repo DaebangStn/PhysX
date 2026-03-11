@@ -1886,6 +1886,27 @@ namespace physx
 			}
 			break;
 
+			case PxArticulationGPUAPIComputeType::eCLEAR_CONSTRAINT_FORCES:
+			{
+				// Zero constraintSpatialForces for given articulations.
+				// Called after env reset so the next eCONSTRAINT_GENERALIZED_FORCES read returns zero.
+				// data is unused (nullptr); kernel signature does not include maxDofs / rootMotion.
+				CUfunction kernelFunction = mGpuKernelWranglerManager->getKernelWrangler()
+					->getCuFunction(PxgKernelIds::CLEAR_ARTI_CONSTRAINT_FORCES);
+				const PxU32 threadsPerWarp = 32, warpsPerBlock = 8;
+				const PxU32 blocks = (nbElements + warpsPerBlock - 1) / warpsPerBlock;
+				KERNEL_PARAM_TYPE kernelParams[] = {
+					CUDA_KERNEL_PARAM(nbElements), CUDA_KERNEL_PARAM(data),
+					CUDA_KERNEL_PARAM(gpuIndices),
+					CUDA_KERNEL_PARAM(mArticulationCoreDesc->articulations),
+				};
+				const CUresult result = mCudaContext->launchKernel(kernelFunction, blocks, 1, 1,
+					threadsPerWarp, warpsPerBlock, 1, 0, mStream, EPILOG);
+				PX_ASSERT(result == CUDA_SUCCESS);
+				PX_UNUSED(result);
+			}
+			break;
+
 			case PxArticulationGPUAPIComputeType::eARTICULATION_COMS_WORLD_FRAME:
 			case PxArticulationGPUAPIComputeType::eARTICULATION_COMS_ROOT_FRAME:
 			{

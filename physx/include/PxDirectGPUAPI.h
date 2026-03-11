@@ -206,11 +206,14 @@ public:
 												//!< and can be queried by calling PxDirectGPUAPI::getArticulationGPUAPIMaxCounts(). The size of the actual data in each subblock can vary by
 												//!< articulation, and will depend on the value of dofCount. The dof indices will be according to the low-level indexing, we refer to
 												//!< the documentation of PxArticulationCache for an explanation.
-	eCONSTRAINT_GENERALIZED_FORCES		//!< Returns the generalized constraint forces (contacts, joint limits, tendons)
+	eCONSTRAINT_GENERALIZED_FORCES,	//!< Returns the generalized constraint forces (contacts, joint limits, tendons)
 										//!< from the previous simulation step, projected to generalized coordinates.
 										//!< Output layout: (maxDofs + 6) * sizeof(float) per articulation.
 										//!< Root force at offsets 0-5; joint DOFs at offsets 6..6+dofCount.
 										//!< NOTE: 1-step lag (values from previous simulate()). Zero before first simulate().
+	eCLEAR_CONSTRAINT_FORCES		//!< Zeroes the per-link constraintSpatialForces buffer for given articulations.
+										//!< Call after env reset so the next eCONSTRAINT_GENERALIZED_FORCES read returns zero.
+										//!< data parameter is unused (pass nullptr).
 	};
 };
 

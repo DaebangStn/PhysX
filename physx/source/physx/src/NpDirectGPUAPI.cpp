@@ -127,8 +127,10 @@ bool NpDirectGPUAPI::computeArticulationData(void* data, const PxArticulationGPU
 	if (!mNpScene.isDirectGPUAPIInitialized())
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__, "PxDirectGPUAPI::computeArticulationData(): it is illegal to call this function if the scene is not configured for direct-GPU access or the direct-GPU API has not been initialized yet.");
 
-	// PT: data/gpuIndices can be null for updateKinematics
-	if ((operation != PxArticulationGPUAPIComputeType::eUPDATE_KINEMATIC) && (!data || !gpuIndices))
+	// PT: data/gpuIndices can be null for updateKinematics and clearConstraintForces
+	const bool dataUnused = (operation == PxArticulationGPUAPIComputeType::eUPDATE_KINEMATIC)
+	                     || (operation == PxArticulationGPUAPIComputeType::eCLEAR_CONSTRAINT_FORCES);
+	if (!dataUnused && (!data || !gpuIndices))
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__, "PxDirectGPUAPI::computeArticulationData(): data and/or gpuIndices has to be valid pointer.");
 
 	return mNpScene.getScScene().getSimulationController()->computeArticulationData(data, gpuIndices, operation, nbElements, startEvent, finishEvent);

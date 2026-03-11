@@ -893,6 +893,29 @@ extern "C" __global__ void computeArtiConstraintForces(
 	}
 }
 
+/// Zero constraintSpatialForces for given articulations.
+/// Called on env reset so next computeArtiConstraintForces reads zero.
+/// data parameter is unused (passed as nullptr).
+extern "C" __global__ void clearArtiConstraintForces(
+    const PxU32 nbIndices,
+    float* PX_RESTRICT /*data*/,
+    const PxArticulationGPUIndex* PX_RESTRICT gpuIndices,
+    const PxgArticulation* articulations)
+{
+    // One warp per articulation (blockIdx.x * warpsPerBlock + threadIdx.y = jobIndex)
+    const PxU32 jobIndex    = blockIdx.x * blockDim.y + threadIdx.y;
+    const PxU32 threadIndex = threadIdx.x;
+
+    if (jobIndex >= nbIndices) return;
+
+    const PxgArticulation& arti = articulations[gpuIndices[jobIndex]];
+    if (!arti.constraintSpatialForces) return;
+
+    const PxU32 linkCount = arti.data.numLinks;
+    for (PxU32 link = threadIndex; link < linkCount; link += WARP_SIZE)
+        arti.constraintSpatialForces[link] = Cm::UnAlignedSpatialVector(PxVec3(0.f), PxVec3(0.f));
+}
+
 // This is an optimized port of FeatherstoneArticulation::getCoriolisAndCentrifugalForce.
 // We process one articulation per warp (32 threads).
 extern "C" __global__ void computeArtiCentrifugalForces(
