@@ -63,6 +63,7 @@ namespace Ext
 
 		// PxDefaultCpuDispatcher
 		virtual			void											release()							PX_OVERRIDE;
+		virtual			void											setForceInline(bool v)			PX_OVERRIDE	{ mForceInline = v;				}
 		virtual			void											setRunProfiled(bool runProfiled)	PX_OVERRIDE	{ mRunProfiled = runProfiled;	}
 		virtual			bool											getRunProfiled()	const			PX_OVERRIDE	{ return mRunProfiled;			}
 		//~PxDefaultCpuDispatcher
@@ -113,6 +114,7 @@ namespace Ext
 						PxU32											mNumThreads;
 						bool											mShuttingDown;
 						bool											mRunProfiled;
+						bool											mForceInline = false;
 		const			PxDefaultCpuDispatcherWaitForWorkMode::Enum		mWaitForWorkMode;
 		const			PxU32											mYieldProcessorCount;
 	};

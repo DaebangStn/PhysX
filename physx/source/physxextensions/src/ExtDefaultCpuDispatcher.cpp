@@ -129,13 +129,13 @@ void Ext::DefaultCpuDispatcher::release()
 
 void Ext::DefaultCpuDispatcher::submitTask(PxBaseTask& task)
 {
-	if(!mNumThreads)
+	if(!mNumThreads || mForceInline)
 	{
-		// no worker threads, run directly
+		// no worker threads (or forced inline for graph capture), run directly
 		runTask(task);
 		task.release();
 		return;
-	}	
+	}
 
 	// TODO: Could use TLS to make this more efficient
 	const PxThread::Id currentThread = PxThread::getId();

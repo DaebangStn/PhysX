@@ -69,6 +69,18 @@ public:
 	\return True if tasks should be profiled.
 	*/
 	virtual bool getRunProfiled() const = 0;
+
+	/**
+	\brief Forces all tasks to run inline on the calling thread.
+
+	When enabled, submitTask() executes tasks immediately instead of
+	dispatching to worker threads. This makes the task pipeline
+	CUDA-graph-capturable since all GPU kernel launches happen on
+	a single thread.
+
+	\param[in] forceInline True to force inline execution.
+	*/
+	virtual void setForceInline(bool forceInline) { PX_UNUSED(forceInline); }
 };
 
 
