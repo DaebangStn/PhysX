@@ -621,5 +621,8 @@ KERNEL_DEF(sdf_CalculateDenseGridPointCloud, "sdfCalculateDenseGridPointCloud")
 KERNEL_DEF(BUILD_STATIC_CONTACT_LISTS, "buildStaticContactListsLaunch")
 // Phase B+: GPU-only contact→articulation mapping (replaces CPU buildAndUploadContactMapping)
 KERNEL_DEF(BUILD_CONTACT_MAPPING_GPU, "buildContactMappingGPULaunch")
+// Phase B++: GPU contact manager lifecycle (replaces CPU processFoundPairs/processLostPairs)
+KERNEL_DEF(UPDATE_CMS_FOUND_GPU, "updateContactManagersFoundGPU")
+KERNEL_DEF(UPDATE_CMS_LOST_GPU, "updateContactManagersLostGPU")
 
 #endif

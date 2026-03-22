@@ -872,6 +872,10 @@ void PxgAABBManager::reallocateChangedAABBMgActorHandleMap(const PxU32 size)
 
 void PxgAABBManager::processFoundPairs()
 {
+	// Single-stream: GPU kernel handles CM updates directly, skip CPU processing
+	if (mCudaContext->isSingleStreamMode())
+		return;
+
 	PxgCudaBroadPhaseSap& gpuBP = getGPUBroadPhase(mBroadPhase);
 
 	gpuBP.purgeDuplicateFoundPairs();	// PT: there is already a profile zone in it
@@ -957,6 +961,9 @@ void PxgAABBManager::processFoundPairs()
 
 void PxgAABBManager::processLostPairs()
 {
+	if (mCudaContext->isSingleStreamMode())
+		return;
+
 	PxgCudaBroadPhaseSap& gpuBP = getGPUBroadPhase(mBroadPhase);
 
 	gpuBP.purgeDuplicateLostPairs();	// PT: there is already a profile zone in it

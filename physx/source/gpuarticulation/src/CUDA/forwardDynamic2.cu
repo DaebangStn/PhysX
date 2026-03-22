@@ -28,6 +28,8 @@
 
 #include "CmSpatialVector.h"
 #include "PxgContactManager.h"
+#include "PxgBroadPhasePairReport.h"
+#include "PxgBroadPhaseDesc.h"
 #include "PxgArticulationCoreDesc.h"
 #include "PxgArticulationLink.h"
 #include "DyArticulationJointCore.h"
@@ -4339,5 +4341,88 @@ void buildContactMappingGPULaunch(
 	// Count valid mappings (denseArticIdx != 0xFFFFFFFF)
 	if (denseIdx != 0xFFFFFFFF)
 		atomicAdd(validCount, 1);
+}
+
+//=============================================================================
+// updateContactManagersGPU — GPU-only contact manager lifecycle
+//
+// Reads broadphase found/lost pairs directly from device and updates
+// the narrowphase contact manager input array. Eliminates CPU
+// processFoundPairs/processLostPairs for CUDA graph capture.
+//
+// Found pairs: append new PxgContactManagerInput entries
+// Lost pairs: invalidate entries (shapeRef = 0xFFFFFFFF)
+//=============================================================================
+
+extern "C" __global__
+void updateContactManagersFoundGPU(
+	const PxgBroadPhasePair* PX_RESTRICT foundPairs,   // [maxPairs] device
+	const PxgBroadPhaseDesc* PX_RESTRICT bpDesc,       // device descriptor (has sharedFoundPairIndex)
+	const PxU32 aggPairOffset,                          // sharedFoundAggPairIndex (skip aggregate pairs)
+	PxgContactManagerInput* PX_RESTRICT cmInputs,       // [maxCMs] narrowphase CM array (existing + new)
+	PxU32* PX_RESTRICT cmCount                           // [1] atomic: current CM count, incremented for new
+)
+{
+	// Total found pairs (actor-actor only, skip aggregate pairs at front)
+	const PxU32 totalFound = bpDesc->sharedFoundPairIndex;
+	const PxU32 actorPairStart = bpDesc->sharedFoundAggPairIndex;
+	const PxU32 nActorPairs = (totalFound > actorPairStart) ? (totalFound - actorPairStart) : 0;
+
+	const PxU32 i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= nActorPairs)
+		return;
+
+	const PxgBroadPhasePair& pair = foundPairs[actorPairStart + i];
+	if (pair.mVolA == PXG_INVALID_BP_HANDLE || pair.mVolB == PXG_INVALID_BP_HANDLE)
+		return;
+
+	// Allocate slot in CM array
+	const PxU32 slot = atomicAdd(cmCount, 1);
+
+	// volA/volB == transformCacheID == shapeRef (non-aggregate)
+	PxgContactManagerInput cm;
+	cm.shapeRef0 = pair.mVolA;
+	cm.shapeRef1 = pair.mVolB;
+	cm.transformCacheRef0 = pair.mVolA;
+	cm.transformCacheRef1 = pair.mVolB;
+	cmInputs[slot] = cm;
+}
+
+extern "C" __global__
+void updateContactManagersLostGPU(
+	const PxgBroadPhasePair* PX_RESTRICT lostPairs,    // [maxPairs] device
+	const PxgBroadPhaseDesc* PX_RESTRICT bpDesc,       // device descriptor
+	const PxU32 aggPairOffset,
+	PxgContactManagerInput* PX_RESTRICT cmInputs,       // [maxCMs] narrowphase CM array
+	const PxU32 cmCount                                  // current CM count
+)
+{
+	const PxU32 totalLost = bpDesc->sharedLostPairIndex;
+	const PxU32 actorPairStart = bpDesc->sharedLostAggPairIndex;
+	const PxU32 nActorPairs = (totalLost > actorPairStart) ? (totalLost - actorPairStart) : 0;
+
+	const PxU32 i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= nActorPairs)
+		return;
+
+	const PxgBroadPhasePair& pair = lostPairs[actorPairStart + i];
+	if (pair.mVolA == PXG_INVALID_BP_HANDLE || pair.mVolB == PXG_INVALID_BP_HANDLE)
+		return;
+
+	// Find and invalidate matching CM entry (linear scan — small N)
+	for (PxU32 j = 0; j < cmCount; ++j)
+	{
+		const PxgContactManagerInput& cm = cmInputs[j];
+		if ((cm.transformCacheRef0 == pair.mVolA && cm.transformCacheRef1 == pair.mVolB) ||
+		    (cm.transformCacheRef0 == pair.mVolB && cm.transformCacheRef1 == pair.mVolA))
+		{
+			// Invalidate by setting shapeRefs to invalid
+			cmInputs[j].shapeRef0 = 0xFFFFFFFF;
+			cmInputs[j].shapeRef1 = 0xFFFFFFFF;
+			cmInputs[j].transformCacheRef0 = 0xFFFFFFFF;
+			cmInputs[j].transformCacheRef1 = 0xFFFFFFFF;
+			break;
+		}
+	}
 }
 
