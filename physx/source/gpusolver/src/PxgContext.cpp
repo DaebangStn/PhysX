@@ -516,6 +516,8 @@ namespace physx
 			mGpuBp->overrideStream(externalStream);
 		// Enable single-stream mode on CudaContext — skips all event/sync operations
 		getNarrowphaseCore()->mCudaContext->setSingleStreamMode(true);
+		// Also skip context push/pop in CudaContextManager
+		getNarrowphaseCore()->mCudaContextManager->setSingleStreamMode(true);
 	}
 
 	//this is the pre-prepare code for block format joints loaded from the non-block format joints

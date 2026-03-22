@@ -190,6 +190,7 @@ void PxgPinnedHostLinearMemoryAllocator::reserveAndGrow(const PxU64 size)
 	// only reallocate when the new size is larger than what we had before.
 	if (size > mTotalSize)
 	{
+		PxGetFoundation().error(PxErrorCode::eDEBUG_WARNING, PX_FL, "[PinnedAlloc] GROW %llu -> %llu\n", (unsigned long long)mTotalSize, (unsigned long long)size);
 		deallocate();
 
 		const PxU64 newSize = PxMax(size, PxU64(PxCeil(mTotalSize * 1.5f))); 

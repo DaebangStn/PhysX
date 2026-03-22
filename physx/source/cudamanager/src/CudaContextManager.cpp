@@ -137,6 +137,7 @@ public:
 	virtual void            acquireContext() PX_OVERRIDE;
 	virtual void            releaseContext() PX_OVERRIDE;
 	virtual bool            tryAcquireContext() PX_OVERRIDE;
+	virtual void            setSingleStreamMode(bool v) PX_OVERRIDE { mSingleStreamMode = v; }
 
 	/* All these methods can be called without acquiring the context */
 	virtual bool            contextIsValid() const PX_OVERRIDE;
@@ -221,6 +222,7 @@ private:
 	int				mSharedMemPerMultiprocessor;
 	int				mClockRate;
 	bool			mUsingConcurrentStreams;
+	bool			mSingleStreamMode = false;
 	uint32_t		mContextRefCountTls;
 #if PX_DEBUG
 	volatile PxI32 mPushPopCount;
@@ -796,11 +798,10 @@ void CudaCtxMgr::acquireContext()
 
 bool CudaCtxMgr::tryAcquireContext()
 {
-	// AD: we directly store the counter in the per-thread value (instead of using a pointer-to-value.)
-	// Using size_t because we have a pointer's width to play with, so the type will potentially depend on the platform.
-	// All the values are initialized to NULL at PxTlsAlloc() and for any newly created thread it will be NULL as well.
-	// So even if a thread hits this code for the first time, we know it's zero, and then we start by placing the correct refcount
-	// below in the set call.
+	// Single-stream mode: skip context push/pop (graph-capture safe)
+	if (mSingleStreamMode)
+		return true;
+
 	size_t refCount = PxTlsGetValue(mContextRefCountTls);
 
 	CUresult result = CUDA_SUCCESS;
@@ -821,6 +822,10 @@ bool CudaCtxMgr::tryAcquireContext()
 
 void CudaCtxMgr::releaseContext()
 {
+	// Single-stream mode: skip context push/pop (graph-capture safe)
+	if (mSingleStreamMode)
+		return;
+
 	size_t refCount = PxTlsGetValue(mContextRefCountTls);
 
 #if PX_DEBUG

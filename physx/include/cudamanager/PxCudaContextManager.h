@@ -393,6 +393,11 @@ public:
     virtual void releaseContext() = 0;
 
 	/**
+	* \brief Skip context push/pop in single-stream mode (graph-capture safe)
+	*/
+	virtual void setSingleStreamMode(bool v) { PX_UNUSED(v); }
+
+	/**
 	* \brief Return the CUcontext
 	*/
 	virtual CUcontext getContext() = 0;
