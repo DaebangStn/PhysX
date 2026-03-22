@@ -197,24 +197,26 @@ namespace physx
 		mCudaContext->memsetD32Async(mDeltaVs.getDevicePtr(), 0, (totalArticulations * maxLinks * nbSlabs * sizeof(Cm::UnAlignedSpatialVector)) / sizeof(PxU32), stream);
 		mCudaContext->memsetD32Async(mSlabHasChanges.getDevicePtr(), 0xFFFFFFFF, totalArticulations*nbSlabs * 2, stream);
 
-		//KS - this is a bit sucky. We already DMAd up this buffer, but now we need to do it again to get the updated deltaV impulse buffer.
-		//The previous one may have been reallocated
-		mArticulationCoreDesc->impulses = reinterpret_cast<Cm::UnAlignedSpatialVector*>(mDeltaVs.getDevicePtr());
-		mArticulationCoreDesc->slabHasChanges = reinterpret_cast<uint2*>(mSlabHasChanges.getDevicePtr());
-		mArticulationCoreDesc->slabDirtyMasks = reinterpret_cast<uint4*>(mSlabDirtyMasks.getDevicePtr());
-		mArticulationCoreDesc->nbSlabs = nbSlabs;
-		mArticulationCoreDesc->nbPartitions = nbPartitions;
-		
-		mArticulationCoreDesc->mPathToRootsPerPartition = reinterpret_cast<PxgArticulationBitFieldStackData*>(mPathToRootPerPartition.getDevicePtr());
-		mArticulationCoreDesc->mImpulseHoldingLink = reinterpret_cast<PxU32*>(mDirtyLinksPerPartition.getDevicePtr());
-		mArticulationCoreDesc->mPartitionAverageScale = reinterpret_cast<PxReal*>(mImpulseScalePerPartition.getDevicePtr());
-
-		mCudaContext->memcpyHtoDAsync(mArticulationCoreDescd.getDevicePtr(), mArticulationCoreDesc, sizeof(PxgArticulationCoreDesc), stream);
+		// Single-stream: device descriptor retains warmup values (pointers unchanged)
+		if (!mCudaContext->isSingleStreamMode())
+		{
+			mArticulationCoreDesc->impulses = reinterpret_cast<Cm::UnAlignedSpatialVector*>(mDeltaVs.getDevicePtr());
+			mArticulationCoreDesc->slabHasChanges = reinterpret_cast<uint2*>(mSlabHasChanges.getDevicePtr());
+			mArticulationCoreDesc->slabDirtyMasks = reinterpret_cast<uint4*>(mSlabDirtyMasks.getDevicePtr());
+			mArticulationCoreDesc->nbSlabs = nbSlabs;
+			mArticulationCoreDesc->nbPartitions = nbPartitions;
+			mArticulationCoreDesc->mPathToRootsPerPartition = reinterpret_cast<PxgArticulationBitFieldStackData*>(mPathToRootPerPartition.getDevicePtr());
+			mArticulationCoreDesc->mImpulseHoldingLink = reinterpret_cast<PxU32*>(mDirtyLinksPerPartition.getDevicePtr());
+			mArticulationCoreDesc->mPartitionAverageScale = reinterpret_cast<PxReal*>(mImpulseScalePerPartition.getDevicePtr());
+			mCudaContext->memcpyHtoDAsync(mArticulationCoreDescd.getDevicePtr(), mArticulationCoreDesc, sizeof(PxgArticulationCoreDesc), stream);
+		}
 	}
 
 	void PxgArticulationCore::gpuMemDmaUpArticulationDesc(const PxU32 offset, const PxU32 nbArticulations, PxReal dt, const PxVec3& gravity,
 		const PxReal invLengthScale, const bool isExternalForcesEveryTgsIterationEnabled)
 	{
+		if (mCudaContext->isSingleStreamMode())
+			return;
 		CUstream stream = mStream; //*mSolverStream
 		//CUstream stream = *mSolverStream;
 
@@ -1012,21 +1014,23 @@ namespace physx
 
 		if (numBlocks)
 		{
-			mArticulationOutputDesc->linkAndJointAndRootStateData = linkAndJointAndRootStateData.begin();
-			mArticulationOutputDesc->sleepData = sleepPool.begin();
-			if (contactResidual.size())
+			// Single-stream: output descriptor retains warmup values
+			if (!mCudaContext->isSingleStreamMode())
 			{
-				mArticulationOutputDesc->errorAccumulator = internalResidualPerArticulation.begin();
-				mArticulationOutputDesc->contactResidualAccumulator = contactResidual.begin();
+				mArticulationOutputDesc->linkAndJointAndRootStateData = linkAndJointAndRootStateData.begin();
+				mArticulationOutputDesc->sleepData = sleepPool.begin();
+				if (contactResidual.size())
+				{
+					mArticulationOutputDesc->errorAccumulator = internalResidualPerArticulation.begin();
+					mArticulationOutputDesc->contactResidualAccumulator = contactResidual.begin();
+				}
+				else
+				{
+					mArticulationOutputDesc->errorAccumulator = NULL;
+					mArticulationOutputDesc->contactResidualAccumulator = NULL;
+				}
+				mCudaContext->memcpyHtoDAsync(mArticulationOutputDescd.getDevicePtr(), mArticulationOutputDesc, sizeof(PxgArticulationOutputDesc), *mSolverStream);
 			}
-			else
-			{
-				mArticulationOutputDesc->errorAccumulator = NULL;
-				mArticulationOutputDesc->contactResidualAccumulator = NULL;
-			}
-
-			//dma output desc to gpu
-			mCudaContext->memcpyHtoDAsync(mArticulationOutputDescd.getDevicePtr(), mArticulationOutputDesc, sizeof(PxgArticulationOutputDesc), *mSolverStream);
 
 			PX_PROFILE_ZONE("GpuArticulationCore.gpuMemDMAbackArticulation", 0);
 

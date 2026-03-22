@@ -817,7 +817,8 @@ void PxgAABBManager::preBpUpdate_GPU()
 		//dma update volume data
 		const PxU32 boxesCapacity = updateData.getCapacity();
 		mVolumDataBuf.allocate(boxesCapacity * sizeof(VolumeData), PX_FL);
-		mCudaContext->memcpyHtoDAsync(mVolumDataBuf.getDevicePtr(), mVolumeData.begin(), sizeof(VolumeData)* boxesCapacity, bpStream);
+		if (!mCudaContext->isSingleStreamMode())
+			mCudaContext->memcpyHtoDAsync(mVolumDataBuf.getDevicePtr(), mVolumeData.begin(), sizeof(VolumeData)* boxesCapacity, bpStream);
 
 		gpuBP.preBroadPhase(updateData);
 	}

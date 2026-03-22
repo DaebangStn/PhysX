@@ -402,13 +402,16 @@ void PxgCudaSolverCore::gpuMemDMAUpContactData(PxgPinnedHostLinearMemoryAllocato
 }
 
 //solverBodyIndices and islandNodeIndices will include rigid bodies and articulations
-void PxgCudaSolverCore::gpuMemDmaUpBodyData(PxPinnedArray<PxgSolverBodyData>& solverBodyDataPool, 
+void PxgCudaSolverCore::gpuMemDmaUpBodyData(PxPinnedArray<PxgSolverBodyData>& solverBodyDataPool,
 		PxPinnedArray<PxgSolverTxIData>& solverTxIDataPool,
 		const PxU32 numSolverBodies,
 		const PxU32 totalNumRigidBatches, const PxU32 totalNumArticBatches,
 		const PxU32 nbSlabs, const PxU32 nbStaticSlabs, const PxU32 maxNumStaticPartitions)
 {
 	PX_PROFILE_ZONE("GpuDynamics.gpuMemDmaUpBodyData", 0);
+
+	if (mCudaContext->isSingleStreamMode())
+		return;
 
 	const PxU32 nbStaticKinematic = solverBodyDataPool.size();
 
@@ -510,7 +513,10 @@ void PxgCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostAllo
 	PxU32* rigidStaticContactCounts, PxU32* rigidStaticJointCounts, const PxReal lengthScale, bool hasForceThresholds)
 {
 	PX_PROFILE_ZONE("GpuDynamics.DMAUp", 0);
-	
+
+	if (mCudaContext->isSingleStreamMode())
+		return;
+
 	PX_UNUSED(lengthScale); // used in TGS only?
 
 	const PxU32 totalContactBlocks = numContactBlockes + numArtiContactBlocks;
@@ -686,10 +692,7 @@ void PxgCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostAllo
 	mCudaContext->memcpyHtoDAsync(mArtiContactBatchIndices.getDevicePtr(), data.artiConstraintContactBatchIndices, sizeof(PxU32) * numArtiContactBatches, mStream);
 	mCudaContext->memcpyHtoDAsync(mArtiConstraint1dBatchIndices.getDevicePtr(), data.artiConstraint1dBatchindices, sizeof(PxU32) * numArti1dConstraintBatches, mStream);
 
-	// Single-stream mode: skip bulk H2D (PAGEABLE source, not graph-capturable).
-	// Device buffer retains warmup values; variable fields patched via D2D in PxgContext.
-	if (!mCudaContext->isSingleStreamMode())
-		mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
+	mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
 
 	mCudaContext->memsetD32Async(solverBodyReferencesd, 0xFFFFFFFF, totalActiveBodyCount * numSlabs, mStream);
 		

@@ -376,24 +376,18 @@ void PxgCudaBroadPhaseSap::gpuDMAUp(const Bp::BroadPhaseUpdateData& updateData, 
 	updateDescriptor(bpDesc);
 	updateRadixSortDesc(rsDescs);
 
-	//DMA the update data to GPU
-	mCudaContext->memcpyHtoDAsync(mCreatedHandlesBuf.getDevicePtr(), updateData.getCreatedHandles(), sizeof(int) * mUpdateData_CreatedHandleSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mRemovedHandlesBuf.getDevicePtr(), updateData.getRemovedHandles(), sizeof(int) * mUpdateData_RemovedHandleSize, mStream);
-#ifdef SUPPORT_UPDATE_HANDLES_ARRAY_FOR_GPU
-	mCudaContext->memcpyHtoDAsync(mUpdatedHandlesBuf.getDevicePtr(), updateData.getUpdatedHandles(), sizeof(int) * mUpdateData_UpdatedHandleSize, mStream);
-#endif
-		
-	/*if(updateData.getStateChanged())
+	// Single-stream: device buffers retain warmup values (no shape changes in mStaticContactsOnly)
+	if (!mCudaContext->isSingleStreamMode())
 	{
-		mCudaContext->memcpyHtoDAsync(mBoxContactDistancesBuf.getDevicePtr(), mContactDistances, sizeof(PxReal)* mBoxesCapacity, mStream);
-		mCudaContext->memcpyHtoDAsync(mBoxGroupsBuf.getDevicePtr(), mBoxGroups, sizeof(PxU32)* mBoxesCapacity, mStream);
-		mCudaContext->memcpyHtoDAsync(mBoxFpBoundsBuf.getDevicePtr(), mBoxBoundsMinMax, sizeof(PxBounds3)* mBoxesCapacity, mStream);			
-	}*/
-		
-	mCudaContext->memcpyHtoDAsync(mBPDescBuf.getDevicePtr(), (void*)&bpDesc, sizeof(PxgBroadPhaseDesc), mStream);
-
-	mCudaContext->memcpyHtoDAsync(mRadixSortDescBuf.getDevicePtr(), rsDescs, sizeof(PxgRadixSortDesc)*6, mStream);
-	mCudaContext->memcpyHtoDAsync(mRadixSortWORDescBuf.getDevicePtr(), mRSDescWOR, sizeof(PxgRadixSortDesc) * 6, mStream);
+		mCudaContext->memcpyHtoDAsync(mCreatedHandlesBuf.getDevicePtr(), updateData.getCreatedHandles(), sizeof(int) * mUpdateData_CreatedHandleSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mRemovedHandlesBuf.getDevicePtr(), updateData.getRemovedHandles(), sizeof(int) * mUpdateData_RemovedHandleSize, mStream);
+#ifdef SUPPORT_UPDATE_HANDLES_ARRAY_FOR_GPU
+		mCudaContext->memcpyHtoDAsync(mUpdatedHandlesBuf.getDevicePtr(), updateData.getUpdatedHandles(), sizeof(int) * mUpdateData_UpdatedHandleSize, mStream);
+#endif
+		mCudaContext->memcpyHtoDAsync(mBPDescBuf.getDevicePtr(), (void*)&bpDesc, sizeof(PxgBroadPhaseDesc), mStream);
+		mCudaContext->memcpyHtoDAsync(mRadixSortDescBuf.getDevicePtr(), rsDescs, sizeof(PxgRadixSortDesc)*6, mStream);
+		mCudaContext->memcpyHtoDAsync(mRadixSortWORDescBuf.getDevicePtr(), mRSDescWOR, sizeof(PxgRadixSortDesc) * 6, mStream);
+	}
 	/*PxCudaStreamFlush(mStreams.begin());*/
 
 #if GPU_BP_DEBUG
