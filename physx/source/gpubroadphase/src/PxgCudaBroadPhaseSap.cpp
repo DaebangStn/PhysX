@@ -1233,15 +1233,18 @@ void PxgCudaBroadPhaseSap::preBroadPhase(const Bp::BroadPhaseUpdateData& updateD
 	if(updateData.getEnvIDs())
 		mBoxEnvIDsBuf.allocate(envIDSize, PX_FL);
 
-	if(updateData.getStateChanged())	// PT: otherwise the call should have been skipped
+	if (!mCudaContext->isSingleStreamMode())
 	{
-		mBoxFpBoundsBuf.allocate(boundsSize, PX_FL);
-		mCudaContext->memcpyHtoDAsync(mBoxFpBoundsBuf.getDevicePtr(), updateData.getAABBs(), boundsSize, mStream);
+		if(updateData.getStateChanged())
+		{
+			mBoxFpBoundsBuf.allocate(boundsSize, PX_FL);
+			mCudaContext->memcpyHtoDAsync(mBoxFpBoundsBuf.getDevicePtr(), updateData.getAABBs(), boundsSize, mStream);
+		}
+		mCudaContext->memcpyHtoDAsync(mBoxContactDistancesBuf.getDevicePtr(), updateData.getContactDistance(), distanceSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mBoxGroupsBuf.getDevicePtr(), updateData.getGroups(), groupSize, mStream);
+		if(updateData.getEnvIDs())
+			mCudaContext->memcpyHtoDAsync(mBoxEnvIDsBuf.getDevicePtr(), updateData.getEnvIDs(), envIDSize, mStream);
 	}
-	mCudaContext->memcpyHtoDAsync(mBoxContactDistancesBuf.getDevicePtr(), updateData.getContactDistance(), distanceSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mBoxGroupsBuf.getDevicePtr(), updateData.getGroups(), groupSize, mStream);
-	if(updateData.getEnvIDs())
-		mCudaContext->memcpyHtoDAsync(mBoxEnvIDsBuf.getDevicePtr(), updateData.getEnvIDs(), envIDSize, mStream);
 }
 
 void PxgCudaBroadPhaseSap::fetchBroadPhaseResults()
