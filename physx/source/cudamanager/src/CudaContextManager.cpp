@@ -1109,6 +1109,11 @@ PxCUresult CudaCtx::eventCreate(CUevent* phEvent, unsigned int Flags)
 		*phEvent = NULL;
 		return mLastResult;
 	}
+	if (mSingleStreamMode)
+	{
+		*phEvent = NULL;
+		return CUDA_SUCCESS;
+	}
 
 	mLastResult = cuEventCreate(phEvent, Flags);
 	return mLastResult;
@@ -1138,6 +1143,8 @@ PxCUresult CudaCtx::eventSynchronize(CUevent hEvent)
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;
 
 	mLastResult = cuEventSynchronize(hEvent);
 	return mLastResult;
@@ -1147,6 +1154,8 @@ PxCUresult CudaCtx::eventDestroy(CUevent hEvent)
 {
 	if (hEvent == NULL)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;
 
 	return cuEventDestroy(hEvent);
 }
@@ -1246,10 +1255,12 @@ PxCUresult CudaCtx::memcpyDtoH(void* dstHost, CUdeviceptr srcDevice, size_t Byte
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Synchronous D→H not allowed during graph capture
 
 	if (ByteCount > 0)
 		mLastResult = cuMemcpyDtoH(dstHost, srcDevice, ByteCount);
-	
+
 	if (mLastResult != CUDA_SUCCESS)
 	{
 		PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "copyDToH failed with error code %i!\n", PxI32(mLastResult));
@@ -1287,6 +1298,8 @@ PxCUresult CudaCtx::memcpyHtoD(CUdeviceptr dstDevice, const void* srcHost, size_
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Synchronous H→D not allowed during graph capture
 
 	if (ByteCount > 0)
 	{
