@@ -1341,8 +1341,12 @@ PxCUresult CudaCtx::memcpyHtoDAsync(CUdeviceptr dstDevice, const void* srcHost, 
 {
 	if (mIsInAbortMode)
 		return mLastResult;
-	// H2D is NOT skipped in single-stream mode — caller-level skip handles this
-	// (gpuMemDMAUp/gpuMemDmaUpBodyData are skipped in mSingleStreamMode)
+	if (mSingleStreamMode && ByteCount >= 100000)
+	{
+		// Get return address for caller identification
+		fprintf(stderr, "[H2D in single-stream] %zu bytes src=%p ret=%p\n",
+		        ByteCount, srcHost, __builtin_return_address(0));
+	}
 	if (ByteCount > 0)
 	{
 		mLastResult = cuMemcpyHtoDAsync(dstDevice, srcHost, ByteCount, hStream);

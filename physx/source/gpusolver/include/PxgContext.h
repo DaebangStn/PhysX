@@ -578,8 +578,13 @@ namespace physx
 		PxU64									mStaticBufAllocSize;         // track allocation size
 
 		void									buildAndUploadContactMapping(CUstream stream);
+		void									launchBuildContactMappingGPU(CUstream stream);
 		void									launchBuildStaticContactLists(CUstream stream);
 		void									freeStaticContactBuffers();
+
+		// GPU-only contact mapping: node→denseIdx lookup table (device)
+		CUdeviceptr								mNodeToDenseIdx_d = 0;
+		PxU32									mNodeToDenseIdxSize = 0;
 
 		const bool								mIsTGS;
 	    bool									mIsExternalForcesEveryTgsIterationEnabled;

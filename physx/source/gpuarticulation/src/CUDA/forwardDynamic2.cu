@@ -27,6 +27,7 @@
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
 #include "CmSpatialVector.h"
+#include "PxgContactManager.h"
 #include "PxgArticulationCoreDesc.h"
 #include "PxgArticulationLink.h"
 #include "DyArticulationJointCore.h"
@@ -4285,5 +4286,58 @@ void buildStaticContactListsLaunch(
 	pid.mCType = 2;  // eARTICULATION_CONTACT (eCONTACT_MANAGER=0 + articulationOffset=2)
 	pid.mPartitionEntryIndex = 0;
 	partIndexArray[uniqueId] = pid;
+}
+
+//=============================================================================
+// buildContactMappingGPU — Phase B+: GPU-only contact→articulation mapping
+//
+// Replaces CPU buildAndUploadContactMapping. Reads narrowphase GPU contact
+// manager input + shape remap table to determine node indices. Builds
+// ContactArticMapping directly on device. No H2D needed.
+//=============================================================================
+
+extern "C" __global__
+void buildContactMappingGPULaunch(
+	const PxgContactManagerInput* PX_RESTRICT cmInputs,  // [nCMs] per-bucket GPU CM data
+	const PxNodeIndex* PX_RESTRICT shapeRemapTable,       // [maxTransformCache] transformCacheRef → nodeIndex
+	const PxU32* PX_RESTRICT nodeToDenseIdx,              // [maxNodeIndex] nodeIndex → dense artic idx (0xFFFFFFFF if not artic)
+	const PxU32 nContactManagers,
+	ContactArticMapping* PX_RESTRICT mappings,            // [nCMs] output
+	PxU32* PX_RESTRICT validCount                         // atomic counter for valid mappings
+)
+{
+	const PxU32 i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= nContactManagers)
+		return;
+
+	const PxgContactManagerInput& cm = cmInputs[i];
+
+	// Look up node indices from shape remap table
+	PxNodeIndex node0 = shapeRemapTable[cm.transformCacheRef0];
+	PxNodeIndex node1 = shapeRemapTable[cm.transformCacheRef1];
+
+	ContactArticMapping m;
+	m.node0 = node0;
+	m.node1 = node1;
+	m.npIndex = i;  // sequential index within this bucket
+	m.edgeIndex = 0; // not used in mStaticContactsOnly (no force thresholds)
+
+	// Determine which node is an articulation contacting a static/kinematic body
+	PxU32 denseIdx = 0xFFFFFFFF;
+	if (node0.isArticulation() && (node1.isStaticBody() || !node1.isValid()))
+	{
+		denseIdx = nodeToDenseIdx[node0.index()];
+	}
+	else if (node1.isArticulation() && (node0.isStaticBody() || !node0.isValid()))
+	{
+		denseIdx = nodeToDenseIdx[node1.index()];
+	}
+	m.denseArticIdx = denseIdx;
+
+	mappings[i] = m;
+
+	// Count valid mappings (denseArticIdx != 0xFFFFFFFF)
+	if (denseIdx != 0xFFFFFFFF)
+		atomicAdd(validCount, 1);
 }
 

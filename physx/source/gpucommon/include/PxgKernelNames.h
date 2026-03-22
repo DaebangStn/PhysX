@@ -619,5 +619,7 @@ KERNEL_DEF(sdf_CalculateDenseGridPointCloud, "sdfCalculateDenseGridPointCloud")
 
 // Phase B: GPU-only static contact list building
 KERNEL_DEF(BUILD_STATIC_CONTACT_LISTS, "buildStaticContactListsLaunch")
+// Phase B+: GPU-only contact→articulation mapping (replaces CPU buildAndUploadContactMapping)
+KERNEL_DEF(BUILD_CONTACT_MAPPING_GPU, "buildContactMappingGPULaunch")
 
 #endif

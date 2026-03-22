@@ -577,7 +577,7 @@ namespace physx
 			totalCms += npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
 		}
 
-		// Build mapping on CPU (temporary pinned/host buffer)
+		// Build mapping on CPU (only used in normal mode / warmup)
 		PxArray<ContactArticMapping> mappings;
 		mappings.resize(totalCms);
 		PxU32 idx = 0;
@@ -678,6 +678,99 @@ namespace physx
 		PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
 		cudaCtx->memcpyHtoDAsync(mStaticContactMapping_d, mappings.begin(),
 			idx * sizeof(ContactArticMapping), stream);
+
+		// Build nodeToDenseIdx lookup table on device (for GPU contact mapping kernel)
+		if (mNodeToDenseIdx_d == 0)
+		{
+			PxU32 maxNodeIdx = 0;
+			for (PxU32 i = 0; i < mArticulationCount; ++i)
+				maxNodeIdx = PxMax(maxNodeIdx, nodeIndices[i].index());
+
+			mNodeToDenseIdxSize = maxNodeIdx + 1;
+			cudaCtx->memAlloc(&mNodeToDenseIdx_d, mNodeToDenseIdxSize * sizeof(PxU32));
+			cudaCtx->memsetD32Async(mNodeToDenseIdx_d, 0xFFFFFFFF, mNodeToDenseIdxSize, stream);
+
+			PxArray<PxU32> hostLookup;
+			hostLookup.resize(mNodeToDenseIdxSize, 0xFFFFFFFF);
+			for (PxU32 i = 0; i < mArticulationCount; ++i)
+				hostLookup[nodeIndices[i].index()] = i;
+			cudaCtx->memcpyHtoDAsync(mNodeToDenseIdx_d, hostLookup.begin(),
+				mNodeToDenseIdxSize * sizeof(PxU32), stream);
+		}
+	}
+
+	void PxgGpuContext::launchBuildContactMappingGPU(CUstream stream)
+	{
+		PX_PROFILE_ZONE("launchBuildContactMappingGPU", 0);
+
+		PxgGpuNarrowphaseCore* npCore = getNarrowphaseCore();
+		PxCudaContext* cudaCtx = npCore->mCudaContext;
+
+		// nodeToDenseIdx must be built during warmup (buildAndUploadContactMapping)
+		PX_ASSERT(mNodeToDenseIdx_d != 0 && "nodeToDenseIdx not initialized — warmup must run first");
+
+		// Count total contact managers across all buckets
+		PxU32 totalCms = 0;
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket]) continue;
+			totalCms += npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+		}
+
+		if (totalCms == 0)
+		{
+			mStaticContactMappingCount = 0;
+			return;
+		}
+
+		// Ensure mapping buffer is large enough
+		const PxU64 mappingBytes = totalCms * sizeof(ContactArticMapping);
+		if (mStaticBufAllocSize < mappingBytes + sizeof(PxU32))
+		{
+			// Need to re-run buildAndUploadContactMapping in normal mode first
+			// This shouldn't happen if warmup was sufficient
+			PxGetFoundation().error(PxErrorCode::eDEBUG_WARNING, PX_FL,
+				"[buildContactMappingGPU] Buffer too small, falling back to CPU path\n");
+			return;
+		}
+
+		// Clear valid count
+		cudaCtx->memsetD32Async(mStaticUniqueIdCounter_d, 0, 1, stream);
+
+		// Get GPU contact manager input data (concatenate across buckets)
+		// For simplicity, launch one kernel per bucket
+		CUfunction func = getArticulationCore()->getKernelFunction(PxgKernelIds::BUILD_CONTACT_MAPPING_GPU);
+		CUdeviceptr shapeRemapPtr = npCore->mGpuShapesManager.mGpuShapesRemapTableBuffer.getDevicePtr();
+
+		PxU32 cmOffset = 0;
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket]) continue;
+			PxgGpuContactManagers& gpuCMs = npCore->getExistingGpuContactManagers(GPU_BUCKET_ID::Enum(bucket));
+			PxU32 nCms = npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+			if (nCms == 0) continue;
+
+			CUdeviceptr cmInputPtr = gpuCMs.mContactManagerInputData.getDevicePtr();
+			CUdeviceptr nodeToDensePtr = mNodeToDenseIdx_d;
+			CUdeviceptr mappingOutPtr = mStaticContactMapping_d + cmOffset * sizeof(ContactArticMapping);
+			CUdeviceptr validCountPtr = mStaticUniqueIdCounter_d;
+
+			void* kernelParams[] = {
+				&cmInputPtr, &shapeRemapPtr, &nodeToDensePtr,
+				&nCms, &mappingOutPtr, &validCountPtr
+			};
+
+			const PxU32 blockSize = 256;
+			const PxU32 numBlocks = (nCms + blockSize - 1) / blockSize;
+			CUresult res = cuLaunchKernel(func, numBlocks, 1, 1, blockSize, 1, 1, 0, stream, kernelParams, NULL);
+			if (res != CUDA_SUCCESS)
+				PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL,
+					"GPU buildContactMappingGPU fail! %d\n", res);
+
+			cmOffset += nCms;
+		}
+
+		mStaticContactMappingCount = totalCms;
 	}
 
 	void PxgGpuContext::launchBuildStaticContactLists(CUstream stream)
@@ -2950,7 +3043,10 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 	if (mIncrementalPartition.getStaticContactsOnly())
 	{
 		CUstream solverStream = mGpuSolverCore->getStream();
-		buildAndUploadContactMapping(solverStream);
+		if (getNarrowphaseCore()->mCudaContext->isSingleStreamMode())
+			launchBuildContactMappingGPU(solverStream);  // GPU-only, no H2D
+		else
+			buildAndUploadContactMapping(solverStream);  // CPU path with H2D (warmup)
 		launchBuildStaticContactLists(solverStream);
 
 		// GPU-direct descriptor patch: update variable count fields from GPU kernel output.
