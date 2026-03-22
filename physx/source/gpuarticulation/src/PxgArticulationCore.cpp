@@ -216,7 +216,15 @@ namespace physx
 		const PxReal invLengthScale, const bool isExternalForcesEveryTgsIterationEnabled)
 	{
 		if (mCudaContext->isSingleStreamMode())
+		{
+			// Skip full H2D — device descriptor retains warmup pointer values.
+			// Only patch articulationOffset (changes per solver phase) via memset.
+			CUstream stream = mStream;
+			mCudaContext->memsetD32Async(
+				mArticulationCoreDescd.getDevicePtr() + offsetof(PxgArticulationCoreDesc, articulationOffset),
+				offset, 1, stream);
 			return;
+		}
 		CUstream stream = mStream; //*mSolverStream
 		//CUstream stream = *mSolverStream;
 
