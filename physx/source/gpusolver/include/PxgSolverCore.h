@@ -479,6 +479,8 @@ namespace physx
 		PxU32				mSolverBodyOutputVelocityOffset;
 
 		PxgRadixSortBuffers	mRadixSort;
+
+		bool				mStaticContactsOnly = false;
 	};
 }
 

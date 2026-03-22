@@ -472,8 +472,22 @@ namespace physx
 	{
 		//Flip the current contact stream
 		mCurrentContactStream = 1 - mCurrentContactStream;
-		mContactStreamPool.mDataStream = mContactStreamAllocators[mCurrentContactStream]->mStart;
-		mPatchStreamPool.mDataStream = mPatchStreamAllocators[mCurrentContactStream]->mStart;
+
+		if (mIncrementalPartition.getStaticContactsOnly()
+			&& mGpuSolverCore->mCompressedContacts.getSize() > 0)
+		{
+			// Phase B: narrowphase writes directly to solver's device buffer.
+			// GPU kernel parameter receives this as a pointer — works for device memory.
+			mContactStreamPool.mDataStream = reinterpret_cast<PxU8*>(
+				mGpuSolverCore->mCompressedContacts.getDevicePtr());
+			mPatchStreamPool.mDataStream = reinterpret_cast<PxU8*>(
+				mGpuSolverCore->mCompressedPatches.getDevicePtr());
+		}
+		else
+		{
+			mContactStreamPool.mDataStream = mContactStreamAllocators[mCurrentContactStream]->mStart;
+			mPatchStreamPool.mDataStream = mPatchStreamAllocators[mCurrentContactStream]->mStart;
+		}
 
 		mContactStreamPool.mSharedDataIndex = 0;
 		mPatchStreamPool.mSharedDataIndex = 0;
@@ -887,12 +901,11 @@ namespace physx
 
 	void PxgGpuContext::doStaticArticulationConstraintPrePrep(physx::PxBaseTask* continuation, const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex)
 	{
-		// Phase B bypass temporarily disabled — debugging
-		// if (mIncrementalPartition.getStaticContactsOnly())
-		// {
-		//     rebuildStaticContactListsDirect(continuation, articulationConstraintBatchIndex, articulationContactBatchIndex);
-		//     return;
-		// }
+		if (mIncrementalPartition.getStaticContactsOnly())
+		{
+			// Phase B: GPU kernel already built per-articulation lists in device buffers.
+			return;
+		}
 
 		PxgBodySimManager& bodyManager = getSimulationController()->getBodySimManager();
 
@@ -1982,13 +1995,25 @@ namespace physx
 		ppData.constraintUniqueIndices = mConstraintUniqueIndices;
 		ppData.artiContactUniqueIndices = mArtiContactUniqueIndices;
 		ppData.artiConstraintUniqueindices = mArtiConstraintUniqueIndices;
-		ppData.artiStaticConstraintUniqueIndices = mArtiStaticConstraintUniqueIndices;
-		ppData.artiStaticContactUniqueIndices = mArtiStaticContactUniqueIndices;
-
-		ppData.artiStaticConstraintStartIndex = mArtiStaticConstraintStartIndex;
-		ppData.artiStaticConstraintCount = mArtiStaticConstraintCount;
-		ppData.artiStaticContactStartIndex = mArtiStaticContactStartIndex;
-		ppData.artiStaticContactCount = mArtiStaticContactCount;
+		if (mIncrementalPartition.getStaticContactsOnly())
+		{
+			// Phase B: GPU kernel device buffer pointers
+			ppData.artiStaticContactUniqueIndices = reinterpret_cast<PxU32*>(mStaticContactIndices_d);
+			ppData.artiStaticContactCount = reinterpret_cast<PxU32*>(mStaticContactCounts_d);
+			ppData.artiStaticConstraintUniqueIndices = NULL;
+			ppData.artiStaticConstraintCount = NULL;
+			ppData.artiStaticConstraintStartIndex = NULL;
+			ppData.artiStaticContactStartIndex = NULL;
+		}
+		else
+		{
+			ppData.artiStaticConstraintUniqueIndices = mArtiStaticConstraintUniqueIndices;
+			ppData.artiStaticContactUniqueIndices = mArtiStaticContactUniqueIndices;
+			ppData.artiStaticConstraintStartIndex = mArtiStaticConstraintStartIndex;
+			ppData.artiStaticConstraintCount = mArtiStaticConstraintCount;
+			ppData.artiStaticContactStartIndex = mArtiStaticContactStartIndex;
+			ppData.artiStaticContactCount = mArtiStaticContactCount;
+		}
 
 		ppData.constraint1DBatchIndices = m1dConstraintBatchIndices.begin();
 		ppData.constraintContactBatchIndices = mContactConstraintBatchIndices.begin();
@@ -2592,7 +2617,9 @@ void PxgGpuContext::update(	Cm::FlushPool& flushPool, PxBaseTask* continuation, 
 
 	// Auto-detect: no dynamic rigid bodies → all contacts are artic↔static
 	// → CPU partition coloring is unnecessary (SOLVE_UNIFIED never launches)
-	mIncrementalPartition.setStaticContactsOnly(bodyCount == 0 && articulationCount > 0);
+	const bool staticOnly = (bodyCount == 0 && articulationCount > 0);
+	mIncrementalPartition.setStaticContactsOnly(staticOnly);
+	mGpuSolverCore->mStaticContactsOnly = staticOnly;
 
 	mPinnedMemoryAllocator->reset();
 
@@ -2896,6 +2923,14 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 
 	const PxInt32ArrayPinned& nodeInteractions = mIncrementalPartition.getNodeInteractionCountArray();
 
+	// Phase B: Build GPU contact lists + skip contact stream H→D
+	if (mIncrementalPartition.getStaticContactsOnly())
+	{
+		CUstream solverStream = mGpuSolverCore->getStream();
+		buildAndUploadContactMapping(solverStream);
+		launchBuildStaticContactLists(solverStream);
+	}
+
 	mGpuSolverCore->gpuMemDMAUpContactData(mContactStreamAllocators[mCurrentContactStream],
 		PxToU32(mContactStreamPool.mSharedDataIndex),
 		mContactStreamPool.mSharedDataIndexGPU,
@@ -2910,6 +2945,16 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 		npIndexArrayStagingBuffer.begin(), npIndexArrayStagingBuffer.size(),
 		/*jointManager.mGpuJointData, jointManager.mGpuJointPrePrep, gpuJointSize,*/ mConstraintWriteBackPool.size(),
 		islandIds.begin(), nodeInteractions.begin(), islandIds.size(), islandStaticTouchCounts.begin(), islandStaticTouchCounts.size());
+
+	// Phase B: override partition data pointers to GPU kernel device buffers
+	if (mIncrementalPartition.getStaticContactsOnly())
+	{
+		PxU32 n = mStaticContactMappingCount;
+		mGpuSolverCore->mPartitionNodeData.set(mStaticNodeArray_d, n * sizeof(PartitionNodeData));
+		mGpuSolverCore->mSolverConstantData.set(mStaticSolverConstants_d, n * sizeof(PxgSolverConstraintManagerConstants));
+		mGpuSolverCore->mPartitionIndexData.set(mStaticPartIndexArray_d, n * sizeof(PartitionIndexData));
+		mGpuSolverCore->mNpIndexArray.set(mStaticNpIndexArray_d, n * sizeof(PxU32));
+	}
 
 	mGpuSolverCore->releaseContext();
 

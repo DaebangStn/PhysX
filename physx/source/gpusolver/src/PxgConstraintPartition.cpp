@@ -1049,6 +1049,13 @@ void PxgIncrementalPartition::processLostFoundPatches(	Cm::FlushPool& flushPool,
 														IG::IslandSim& islandSim, PxgBodySimManager& bodySimManager, PxgJointManager& jointManager,
 														PxsContactManager** lostFoundPatchManagers, PxU32 nbLostFoundPatchManagers, const PxsContactManagerOutputCounts* lostFoundPairOutputs)
 {
+	if (mStaticContactsOnly)
+	{
+		// Phase B: skip entirely — GPU kernel builds contact lists directly.
+		// Task chain safe: postIslandGen(&mSolver) still holds &mSolver reference.
+		return;
+	}
+
 	nvtxRangePush("px:processLostFoundPatches");
 #if USE_SPLIT_SECOND_PASS_ISLAND_GEN
 	// PT: this copy is necessary when running postIslandGen in parallel with this function. Specifically
@@ -1960,11 +1967,8 @@ void PxgIncrementalPartition::updateIncrementalIslands(
 
 	if(mStaticContactsOnly)
 	{
-		// Run Part1+Part2 for bodySimManager registration (needed for contact tracking)
-		// Skip Part3 (compaction/accumulation) — no partitioned constraints.
-		updateIncrementalIslands_Part1(islandSim, islandManagerData, iterator, bodySimManager, jointManager);
-		updateIncrementalIslands_Part2(islandSim, islandManagerData, iterator, bodySimManager);
-
+		// Phase B: Part1+Part2+Part3 모두 skip.
+		// Contact list는 GPU kernel이 직접 구성.
 		mNbPartitions = 0;
 		mTotalContacts = 0;
 		mTotalConstraints = 0;

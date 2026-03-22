@@ -333,8 +333,18 @@ void PxgSolverCore::constructConstraintPrePrepDesc(PxgPrePrepDesc& preDesc, PxU3
 	preDesc.artiJointData = reinterpret_cast<PxgD6JointData*>(simCore->getD6ArtiJointBuffer().getDevicePtr());
 	preDesc.artiConstraintPrePrep = reinterpret_cast<PxgConstraintPrePrep*>(simCore->getD6ArtiJointPrePreBuffer().getDevicePtr());
 
-	preDesc.cpuCompressedContactsBase = cpuCompressedContactsBase;
-	preDesc.cpuCompressedPatchesBase = cpuCompressedPatchesBase;
+	if (mStaticContactsOnly)
+	{
+		// Phase B: narrowphase wrote directly to device buffer.
+		// Offset math: contactPoints - base = index. Both are device ptrs → same offset.
+		preDesc.cpuCompressedContactsBase = reinterpret_cast<PxContact*>(mCompressedContacts.getDevicePtr());
+		preDesc.cpuCompressedPatchesBase = reinterpret_cast<PxContactPatch*>(mCompressedPatches.getDevicePtr());
+	}
+	else
+	{
+		preDesc.cpuCompressedContactsBase = cpuCompressedContactsBase;
+		preDesc.cpuCompressedPatchesBase = cpuCompressedPatchesBase;
+	}
 	preDesc.cpuForceBufferBase = cpuForceBufferBase;
 
 	preDesc.contactManagerOutputBase = reinterpret_cast<PxsContactManagerOutput*>(mGpuContactManagerOutputBase);
