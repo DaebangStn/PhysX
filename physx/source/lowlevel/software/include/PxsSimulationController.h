@@ -248,6 +248,7 @@ namespace physx
 
 		virtual void setSkipHostSync(bool) {}
 		virtual bool getSkipHostSync() const { return false; }
+		virtual void overrideCudaStream(CUstream) {}
 
 #if PX_SUPPORT_OMNI_PVD
 		virtual void setOVDCallbacks(PxsSimulationControllerOVDCallbacks& /*ovdCallbacks*/) {}

@@ -4429,6 +4429,11 @@ namespace physx
 		return mSkipHostSync;
 	}
 
+	void PxgSimulationController::overrideCudaStream(CUstream stream)
+	{
+		mDynamicContext->overrideAllStreams(stream);
+	}
+
 #if PX_SUPPORT_OMNI_PVD
 	void PxgSimulationController::setOVDCallbacks(PxsSimulationControllerOVDCallbacks& ovdCallbacks)
 	{

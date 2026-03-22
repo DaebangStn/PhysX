@@ -3710,6 +3710,13 @@ void NpScene::setSkipHostSync(bool skip)
 		sc->setSkipHostSync(skip);
 }
 
+void NpScene::overrideCudaStream(CUstream stream)
+{
+	PxsSimulationController* sc = mScene.getSimulationController();
+	if (sc)
+		sc->overrideCudaStream(stream);
+}
+
 // PT: DIRECTGPU: deprecated
 void NpScene::copySoftBodyData(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent)
 {

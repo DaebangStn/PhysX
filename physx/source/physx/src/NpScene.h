@@ -322,6 +322,7 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 	virtual	void									setDeformableVolumeGpuPostSolveCallback(PxPostSolveCallback* postSolveCallback)	PX_OVERRIDE	PX_FINAL;
 
 	virtual void									setSkipHostSync(bool skip)	PX_OVERRIDE	PX_FINAL;
+	virtual void									overrideCudaStream(CUstream stream)	PX_OVERRIDE	PX_FINAL;
 
 	virtual			PxSolverType::Enum				getSolverType()	const	PX_OVERRIDE PX_FINAL;
 

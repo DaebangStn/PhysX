@@ -505,6 +505,15 @@ namespace physx
 		return mGpuSolverCore->getDataStreamBase(contactStreamBase, patchStreamBase, forceAndIndiceStreamBase);
 	}
 
+	void PxgGpuContext::overrideAllStreams(CUstream externalStream)
+	{
+		mGpuSolverCore->overrideStream(externalStream);
+		getNarrowphaseCore()->overrideStream(externalStream);
+		getArticulationCore()->overrideStream(externalStream);
+		// Update solver stream pointer in articulation core (it holds a pointer to solver's mStream)
+		getArticulationCore()->setSolverStream(mGpuSolverCore->getStreamRef());
+	}
+
 	//this is the pre-prepare code for block format joints loaded from the non-block format joints
 
 	void PxgGpuContext::doConstraintJointBlockPrePrepGPU()

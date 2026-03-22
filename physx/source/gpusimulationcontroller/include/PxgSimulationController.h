@@ -707,6 +707,7 @@ namespace physx
 
 		virtual void setSkipHostSync(bool skip) PX_OVERRIDE;
 		virtual bool getSkipHostSync() const PX_OVERRIDE;
+		virtual void overrideCudaStream(CUstream stream) PX_OVERRIDE;
 
 #if PX_SUPPORT_OMNI_PVD
 		virtual void setOVDCallbacks(PxsSimulationControllerOVDCallbacks& ovdCallbacks) PX_OVERRIDE;

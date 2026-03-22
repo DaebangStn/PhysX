@@ -116,6 +116,7 @@ namespace physx
 		PxU32 getNbActiveArticulations() const { return mNbActiveArticulation; }
 
 		CUstream getStream() { return mStream; }
+		void overrideStream(CUstream s) { mStream = s; }
 
 		CUevent getFlushArticulationDataEvent() { return mFlushArticulationDataEvent; }
 

@@ -1752,6 +1752,8 @@ class PxScene : public PxSceneSQSystem
 	*/
 	virtual void setSkipHostSync(bool skip) { PX_UNUSED(skip); }
 
+	virtual void overrideCudaStream(CUstream stream) { PX_UNUSED(stream); }
+
 	void*	userData;	//!< user can assign this to whatever, usually to create a 1:1 relationship with a user object.
 
 	/**

@@ -96,6 +96,7 @@ class PxgCudaBroadPhaseSap : public Bp::BroadPhase
 	PX_FORCE_INLINE	PxgTypedCudaBuffer<PxReal>&	getContactDistBuffer()			{ return mBoxContactDistancesBuf;		}
 //	PX_FORCE_INLINE	PxCudaContextManager*		getCudaContextManager()			{ return mCudaContextManager;			}
 	PX_FORCE_INLINE	CUstream					getBpStream()					{ return mStream;						}
+	void										overrideStream(CUstream s)		{ mStream = s;							}
 	PX_FORCE_INLINE	PxgDevicePointer<PxgBroadPhaseDesc>	getBroadPhaseDescDevicePtr() { return mBPDescBuf.getTypedDevicePtr();}
 //	PX_FORCE_INLINE	CUdeviceptr					getFoundPairsDevicePtr()		{ return mFoundPairsBuf.getDevicePtr();	}
 //	PX_FORCE_INLINE	CUdeviceptr					getLostPairsDevicePtr()			{ return mLostPairsBuf.getDevicePtr();	}

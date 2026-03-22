@@ -622,6 +622,7 @@ namespace physx
 		void releaseContext();
 
 		CUstream getStream();
+		void overrideStream(CUstream externalStream) { mStream = externalStream; }
 
 		void registerContactManager(PxsContactManager* cm, const Sc::ShapeInteraction* shapeInteraction, PxsContactManagerOutput& output, const PxU32 bucketId);
 		void unregisterContactManager(PxsContactManager* manager, const PxU32 bucketId);
