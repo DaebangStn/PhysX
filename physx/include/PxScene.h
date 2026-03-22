@@ -1754,6 +1754,15 @@ class PxScene : public PxSceneSQSystem
 
 	virtual void overrideCudaStream(CUstream stream) { PX_UNUSED(stream); }
 
+	/**
+	\brief Direct simulation without task chain or fetchResults.
+
+	Bypasses NpScene-level task framework, stage validation, and callbacks.
+	Calls Sc::Scene::simulate() directly. Only valid in single-stream mode
+	with forceInline=true. Does not require fetchResults().
+	*/
+	virtual void simulateDirect(PxReal elapsedTime) { PX_UNUSED(elapsedTime); }
+
 	void*	userData;	//!< user can assign this to whatever, usually to create a 1:1 relationship with a user object.
 
 	/**

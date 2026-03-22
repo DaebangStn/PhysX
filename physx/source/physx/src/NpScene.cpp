@@ -3717,6 +3717,27 @@ void NpScene::overrideCudaStream(CUstream stream)
 		sc->overrideCudaStream(stream);
 }
 
+void NpScene::simulateDirect(PxReal elapsedTime)
+{
+	// Minimal task framework setup — Sc::Scene::simulate needs a valid
+	// continuation (its internal setContinuation asserts non-null).
+	// We reuse mSceneCompletion as the sink for the task chain.
+	mTaskManager->resetDependencies();
+	mTaskManager->startSimulation();
+	mSceneCompletion.setContinuation(*mTaskManager, nullptr);
+
+	// Sc::Scene::simulate sets up: collideStep → advanceStep → mSceneCompletion
+	// With forceInline, the entire chain executes inline before returning.
+	mScene.simulate(elapsedTime, &mSceneCompletion);
+
+	// advanceStep's release() decremented mSceneCompletion (refcount=1 remaining).
+	// Remove the initial reference to trigger completion.
+	mSceneCompletion.removeReference();
+
+	mTaskManager->stopSimulation();
+	mPhysicsDone.reset();
+}
+
 // PT: DIRECTGPU: deprecated
 void NpScene::copySoftBodyData(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent)
 {

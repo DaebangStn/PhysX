@@ -844,7 +844,10 @@ void PxgAABBManager::postBroadPhase(PxBaseTask* continuation, Cm::FlushPool& /*f
 		mBroadPhase.fetchBroadPhaseResults();
 	}
 
-	resizeFoundAndLostPairs();
+	// In single-stream mode, fetchBroadPhaseResults already set max sizes.
+	// resizeFoundAndLostPairs reads mAggregateDesc which wasn't DMA'd back.
+	if (!mCudaContext->isSingleStreamMode())
+		resizeFoundAndLostPairs();
 
 	if (continuation)
 	{

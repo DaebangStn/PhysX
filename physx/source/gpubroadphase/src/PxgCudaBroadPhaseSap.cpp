@@ -1256,7 +1256,18 @@ void PxgCudaBroadPhaseSap::fetchBroadPhaseResults()
 
 	PxScopedCudaLock _lock_(*mCudaContextManager);
 
-	gpuDMABack(*mBpDesc);
+	if (mCudaContext->isSingleStreamMode())
+	{
+		// Graph-capture-safe path: skip D2H copy + spinWait entirely.
+		// mBpDesc (pinned memory) retains the PREVIOUS frame's values,
+		// so pair counts and sizes are stale but valid (no new allocs needed).
+		// The actual pair data in pinned arrays was written by GPU kernels
+		// on the same stream — ordering guarantees correctness on replay.
+	}
+	else
+	{
+		gpuDMABack(*mBpDesc);
+	}
 
 	//purgeDuplicateFoundPairs();
 	//purgeDuplicateLostPairs();

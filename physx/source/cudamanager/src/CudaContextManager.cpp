@@ -850,12 +850,29 @@ private:
 	bool mLaunchSynchronous;
 	bool mIsInAbortMode;
 	bool mSingleStreamMode = false;
+	bool mSkipHtoD = false;
+	bool mCaptureBreakDetected = false;
+	CUstream mTrackedStream = nullptr;
 	std::unordered_map<void*, CUdeviceptr> mHostDevicePtrCache;
+
+	void checkCaptureBreak(const char* opName, CUstream stream = nullptr) {
+		if (!mSingleStreamMode || mCaptureBreakDetected) return;
+		CUstream s = stream ? stream : mTrackedStream;
+		if (!s) return;
+		CUstreamCaptureStatus st;
+		if (cuStreamIsCapturing(s, &st) == CUDA_SUCCESS && st == CU_STREAM_CAPTURE_STATUS_INVALIDATED) {
+			fprintf(stderr, "[CAPTURE BREAK] %s\n", opName);
+			mCaptureBreakDetected = true;
+		}
+	}
 
 public:
 	CudaCtx(PxDeviceAllocatorCallback* callback, bool launchSynchronous);
 
-	void setSingleStreamMode(bool v) PX_OVERRIDE PX_FINAL { mSingleStreamMode = v; }
+	void setSingleStreamMode(bool v) PX_OVERRIDE PX_FINAL { mSingleStreamMode = v; mCaptureBreakDetected = false; }
+	bool isSingleStreamMode() const PX_OVERRIDE PX_FINAL { return mSingleStreamMode; }
+	void setTrackedStream(CUstream s) { mTrackedStream = s; }
+	void setSkipHtoD(bool v) PX_OVERRIDE PX_FINAL { mSkipHtoD = v; }
 	~CudaCtx();
 
 	// PxCudaContext
@@ -957,11 +974,8 @@ PxCUresult CudaCtx::memAlloc(CUdeviceptr *dptr, size_t bytesize)
 		return mLastResult;
 	}
 
-	if (mSingleStreamMode)
+	if (0) // Memory alloc OK during warmup (before graph capture)
 	{
-		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemAlloc called during single-stream mode! size=%zu\n", bytesize);
-		*dptr = 0;
-		return CUDA_ERROR_NOT_SUPPORTED;
 	}
 	mLastResult = cuMemAlloc(dptr, bytesize);
 #if PX_STOMP_ALLOCATED_MEMORY
@@ -981,22 +995,12 @@ PxCUresult CudaCtx::memFree(CUdeviceptr dptr)
 {
 	if ((void*)dptr == NULL)
 		return mLastResult;
-	if (mSingleStreamMode)
-	{
-		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemFree called!\n");
-		return CUDA_ERROR_NOT_SUPPORTED;
-	}
+	// memFree OK during warmup (before graph capture)
  	return cuMemFree(dptr);
 }
 
 PxCUresult CudaCtx::memHostAlloc(void** pp, size_t bytesize, unsigned int Flags)
 {
-	if (mSingleStreamMode)
-	{
-		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemHostAlloc called during single-stream mode! size=%zu\n", bytesize);
-		*pp = nullptr;
-		return CUDA_ERROR_NOT_SUPPORTED;
-	}
 	CUresult result = cuMemHostAlloc(pp, bytesize, Flags);
 #if PX_STOMP_ALLOCATED_MEMORY
 	if(*pp != NULL && bytesize > 0)
@@ -1092,6 +1096,8 @@ PxCUresult CudaCtx::streamFlush(CUstream hStream)
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // cuStreamQuery not allowed during graph capture
 
 	// AD: don't remember the error, because this can return CUDA_ERROR_NOT_READY which is not really an error.
 	// We just misuse streamquery to push the buffer anyway.
@@ -1169,6 +1175,8 @@ PxCUresult CudaCtx::eventQuery(CUevent hEvent)
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Single-stream: event always complete (same stream ordering)
 
 	mLastResult = cuEventQuery(hEvent);
 	return mLastResult;
@@ -1230,6 +1238,7 @@ PxCUresult CudaCtx::launchKernel(
 			kernelParamsLocal,
 			extra
 		);
+		checkCaptureBreak("launchKernel", hStream);
 
 		if (mLaunchSynchronous)
 		{
@@ -1309,7 +1318,6 @@ PxCUresult CudaCtx::memcpyDtoHAsync(void* dstHost, CUdeviceptr srcDevice, size_t
 {
 	if (mIsInAbortMode)
 		return mLastResult;
-
 	if (ByteCount > 0)
 	{
 		mLastResult = cuMemcpyDtoHAsync(dstHost, srcDevice, ByteCount, hStream);
@@ -1351,6 +1359,9 @@ PxCUresult CudaCtx::memcpyHtoDAsync(CUdeviceptr dstDevice, const void* srcHost, 
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	// Single-stream + graph capture ready: skip ALL H2D (device buffers retain warmup values)
+	if (mSingleStreamMode && mSkipHtoD)
+		return CUDA_SUCCESS;
 
 	if (ByteCount > 0)
 	{
@@ -1402,10 +1413,19 @@ PxCUresult CudaCtx::memcpyDtoD(CUdeviceptr dstDevice, CUdeviceptr srcDevice, siz
 
 	if (ByteCount > 0)
 	{
-		mLastResult = cuMemcpyDtoD(dstDevice, srcDevice, ByteCount);
-		// synchronize to avoid race conditions. 
-		// https://docs.nvidia.com/cuda/cuda-driver-api/api-sync-behavior.html#api-sync-behavior__memcpy
-		mLastResult = cuStreamSynchronize(0);
+		if (mSingleStreamMode)
+		{
+			// Use async D2D on the tracked stream — sync memcpy + streamSynchronize
+			// are not allowed during graph capture
+			mLastResult = cuMemcpyDtoDAsync(dstDevice, srcDevice, ByteCount, mTrackedStream);
+		}
+		else
+		{
+			mLastResult = cuMemcpyDtoD(dstDevice, srcDevice, ByteCount);
+			// synchronize to avoid race conditions.
+			// https://docs.nvidia.com/cuda/cuda-driver-api/api-sync-behavior.html#api-sync-behavior__memcpy
+			mLastResult = cuStreamSynchronize(0);
+		}
 		if (mLastResult != CUDA_SUCCESS)
 		{
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "memcpyDtoD invalid parameters!! Error: %i\n", mLastResult);

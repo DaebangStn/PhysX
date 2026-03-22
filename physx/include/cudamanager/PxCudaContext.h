@@ -183,6 +183,9 @@ namespace physx
 		virtual bool isInAbortMode() = 0;
 
 		virtual void setSingleStreamMode(bool v) { PX_UNUSED(v); }
+		virtual bool isSingleStreamMode() const { return false; }
+		virtual void setTrackedStream(CUstream s) { PX_UNUSED(s); }
+		virtual void setSkipHtoD(bool v) { PX_UNUSED(v); }
 	};
 
 #if !PX_DOXYGEN

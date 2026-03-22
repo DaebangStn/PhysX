@@ -46,7 +46,7 @@ void PxgCudaBuffer::allocate(const PxU64 size, const char* filename, PxI32 line)
 
 	if (mSize < size)
 	{
-		if (mSize > 0 && mPtr) 
+		if (mSize > 0 && mPtr)
 		{
 #if MEMCHECK_SUPPORT
 			PX_UNUSED(filename);

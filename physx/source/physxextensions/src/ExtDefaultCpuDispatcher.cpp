@@ -30,7 +30,6 @@
 #include "ExtCpuWorkerThread.h"
 #include "ExtTaskQueueHelper.h"
 #include <cstdio>
-// cuda.h removed — not available in PhysXExtensions build
 #include "foundation/PxString.h"
 
 using namespace physx;
