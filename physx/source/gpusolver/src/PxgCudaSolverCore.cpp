@@ -686,7 +686,10 @@ void PxgCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostAllo
 	mCudaContext->memcpyHtoDAsync(mArtiContactBatchIndices.getDevicePtr(), data.artiConstraintContactBatchIndices, sizeof(PxU32) * numArtiContactBatches, mStream);
 	mCudaContext->memcpyHtoDAsync(mArtiConstraint1dBatchIndices.getDevicePtr(), data.artiConstraint1dBatchindices, sizeof(PxU32) * numArti1dConstraintBatches, mStream);
 
-	mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
+	// Single-stream mode: skip bulk H2D (PAGEABLE source, not graph-capturable).
+	// Device buffer retains warmup values; variable fields patched via D2D in PxgContext.
+	if (!mCudaContext->isSingleStreamMode())
+		mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
 
 	mCudaContext->memsetD32Async(solverBodyReferencesd, 0xFFFFFFFF, totalActiveBodyCount * numSlabs, mStream);
 		

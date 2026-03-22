@@ -2081,24 +2081,26 @@ namespace physx
 
 		mGpuArticulationCore->allocDeltaVBuffer(nbSlabs, nbPartitions, mGpuSolverCore->getStream());
 
-		mGpuSolverCore->gpuMemDMAUp(*mPinnedMemoryAllocator, ppData, mSolverBodyPool.size(),
-			mConstraintBatchHeaders, mIslandContextPool, mNumIslandContextPool, pData,
-			mNumConstraintBatches, mNumRigidStaticConstraintBatches, mNumArticConstraintBatches, mNumArtiStaticConstraintBatches, mNumArtiSelfConstraintBatches, cData,
-			PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumContactBatches + mNumStaticRigidContactBatches), 4u * (mNumContactBatches + mNumStaticRigidContactBatches),
-			PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches), 4u * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches),
-			mTotalEdges, mTotalPreviousEdges,
-			nbSlabs,
-			maxCombinedSlabPartitions, mEnableStabilization, mPatchStreamAllocators[mCurrentContactStream]->mStart, mContactStreamAllocators[mCurrentContactStream]->mStart,
-			mForceStreamAllocator->mStart, mOutputIterator, mSolverBodyPool.size() - (mKinematicCount + 1), mKinematicCount + 1, mArticulationCount,
-			reinterpret_cast<Cm::UnAlignedSpatialVector*>(mGpuArticulationCore->getDeferredZ()),
-			reinterpret_cast<PxU32*>(mGpuArticulationCore->getArticulationDirty()),
-			reinterpret_cast<uint4*>(mGpuArticulationCore->getArticulationSlabMask()),
-			mGPUShapeInteractions, mGPURestDistances, mGPUTorsionalData, mArtiStaticContactIndices.begin(), mArtiStaticContactIndices.size(),
-			mArtiStaticJointIndices.begin(), mArtiStaticJointIndices.size(), mArtiStaticContactCounts.begin(), mArtiStaticJointCounts.begin(),
-			mArtiSelfContactIndices.begin(), mArtiSelfContactIndices.size(),
-			mArtiSelfJointIndices.begin(), mArtiSelfJointIndices.size(), mArtiSelfContactCounts.begin(), mArtiSelfJointCounts.begin(),
-			mRigidStaticContactIndices.begin(), mRigidStaticContactIndices.size(), mRigidStaticJointIndices.begin(), mRigidStaticJointIndices.size(),
-			mRigidStaticContactCounts.begin(), mRigidStaticJointCounts.begin(), mLengthScale, hasForceThresholds);
+		{
+			mGpuSolverCore->gpuMemDMAUp(*mPinnedMemoryAllocator, ppData, mSolverBodyPool.size(),
+				mConstraintBatchHeaders, mIslandContextPool, mNumIslandContextPool, pData,
+				mNumConstraintBatches, mNumRigidStaticConstraintBatches, mNumArticConstraintBatches, mNumArtiStaticConstraintBatches, mNumArtiSelfConstraintBatches, cData,
+				PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumContactBatches + mNumStaticRigidContactBatches), 4u * (mNumContactBatches + mNumStaticRigidContactBatches),
+				PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches), 4u * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches),
+				mTotalEdges, mTotalPreviousEdges,
+				nbSlabs,
+				maxCombinedSlabPartitions, mEnableStabilization, mPatchStreamAllocators[mCurrentContactStream]->mStart, mContactStreamAllocators[mCurrentContactStream]->mStart,
+				mForceStreamAllocator->mStart, mOutputIterator, mSolverBodyPool.size() - (mKinematicCount + 1), mKinematicCount + 1, mArticulationCount,
+				reinterpret_cast<Cm::UnAlignedSpatialVector*>(mGpuArticulationCore->getDeferredZ()),
+				reinterpret_cast<PxU32*>(mGpuArticulationCore->getArticulationDirty()),
+				reinterpret_cast<uint4*>(mGpuArticulationCore->getArticulationSlabMask()),
+				mGPUShapeInteractions, mGPURestDistances, mGPUTorsionalData, mArtiStaticContactIndices.begin(), mArtiStaticContactIndices.size(),
+				mArtiStaticJointIndices.begin(), mArtiStaticJointIndices.size(), mArtiStaticContactCounts.begin(), mArtiStaticJointCounts.begin(),
+				mArtiSelfContactIndices.begin(), mArtiSelfContactIndices.size(),
+				mArtiSelfJointIndices.begin(), mArtiSelfJointIndices.size(), mArtiSelfContactCounts.begin(), mArtiSelfJointCounts.begin(),
+				mRigidStaticContactIndices.begin(), mRigidStaticContactIndices.size(), mRigidStaticJointIndices.begin(), mRigidStaticJointIndices.size(),
+				mRigidStaticContactCounts.begin(), mRigidStaticJointCounts.begin(), mLengthScale, hasForceThresholds);
+		}
 
 		//Make sure that the GPU articulation work has completed now...
 		mGpuArticulationCore->syncUnconstrainedVelocities();
@@ -2950,6 +2952,24 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 		CUstream solverStream = mGpuSolverCore->getStream();
 		buildAndUploadContactMapping(solverStream);
 		launchBuildStaticContactLists(solverStream);
+
+		// GPU-direct descriptor patch: update variable count fields from GPU kernel output.
+		// mStaticUniqueIdCounter_d has the actual contact count (set by buildStaticContactLists kernel).
+		// Patch PxgConstraintPrepareDesc.numArtiStaticContactBatches + totalCurrentEdges on device.
+		if (getNarrowphaseCore()->mCudaContext->isSingleStreamMode())
+		{
+			PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
+			CUdeviceptr prepDescd = mGpuSolverCore->getPrepDescDeviceptr();
+			if (prepDescd)
+			{
+				cudaCtx->memcpyDtoDAsync(
+					prepDescd + offsetof(PxgConstraintPrepareDesc, numArtiStaticContactBatches),
+					mStaticUniqueIdCounter_d, sizeof(PxU32), solverStream);
+				cudaCtx->memcpyDtoDAsync(
+					prepDescd + offsetof(PxgConstraintPrepareDesc, totalCurrentEdges),
+					mStaticUniqueIdCounter_d, sizeof(PxU32), solverStream);
+			}
+		}
 	}
 
 	// Phase B+: skip H2D upload entirely when GPU kernel already built contact data on device.

@@ -405,9 +405,11 @@ void PxgTGSCudaSolverCore::gpuMemDmaUpBodyData(PxPinnedArray<PxgSolverBodyData>&
 	
 	const PxU32 nbStaticKinematic = solverBodyDataPool.size();
 
-	mCudaContext->memcpyHtoDAsync(mSolverBodyDataPool.getDevicePtr(), solverBodyDataPool.begin(), sizeof(PxgSolverBodyData) * nbStaticKinematic, mStream);
-		
-	mCudaContext->memcpyHtoDAsync(mSolverTxIDataPool.getDevicePtr(), solverTxIDataPool.begin(), sizeof(PxgSolverTxIData) * nbStaticKinematic, mStream);
+	if (!mCudaContext->isSingleStreamMode())
+	{
+		mCudaContext->memcpyHtoDAsync(mSolverBodyDataPool.getDevicePtr(), solverBodyDataPool.begin(), sizeof(PxgSolverBodyData) * nbStaticKinematic, mStream);
+		mCudaContext->memcpyHtoDAsync(mSolverTxIDataPool.getDevicePtr(), solverTxIDataPool.begin(), sizeof(PxgSolverTxIData) * nbStaticKinematic, mStream);
+	}
 
 	//Allocate space for 3 float4s per-body referenced by a batch. That's 3 * 2 * 32 * sizeof(float4). 
 	const PxU32 numRigidBodyMirrorBodies = totalNumRigidBatches * 3 * 2 * 32;
@@ -624,10 +626,13 @@ void PxgTGSCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostA
 	mTempContactHeaderBlockBuffer.allocate(numBlocks * sizeof(PxU32), PX_FL);
 	mTempConstraintHeaderBlockBuffer.allocate(numBlocks * sizeof(PxU32), PX_FL);
 
-	mCudaContext->memcpyHtoDAsync(mRigidStaticContactIndices.getDevicePtr(), rigidStaticContactIndices, sizeof(PxU32)*rigidStaticContactIndSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mRigidStaticJointIndices.getDevicePtr(), rigidStaticJointIndices, sizeof(PxU32)*rigidStaticJointSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mRigidStaticContactCounts.getDevicePtr(), rigidStaticContactCounts, sizeof(PxU32)*islandContextPool->mBodyCount, mStream);
-	mCudaContext->memcpyHtoDAsync(mRigidStaticJointCounts.getDevicePtr(), rigidStaticJointCounts, sizeof(PxU32)*islandContextPool->mBodyCount, mStream);
+	if (!mCudaContext->isSingleStreamMode())
+	{
+		mCudaContext->memcpyHtoDAsync(mRigidStaticContactIndices.getDevicePtr(), rigidStaticContactIndices, sizeof(PxU32)*rigidStaticContactIndSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mRigidStaticJointIndices.getDevicePtr(), rigidStaticJointIndices, sizeof(PxU32)*rigidStaticJointSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mRigidStaticContactCounts.getDevicePtr(), rigidStaticContactCounts, sizeof(PxU32)*islandContextPool->mBodyCount, mStream);
+		mCudaContext->memcpyHtoDAsync(mRigidStaticJointCounts.getDevicePtr(), rigidStaticJointCounts, sizeof(PxU32)*islandContextPool->mBodyCount, mStream);
+	}
 
 	mArtiStaticContactIndices.allocate(artiStaticContactIndSize * sizeof(PxU32), PX_FL);
 	mArtiStaticJointIndices.allocate(artiStaticJointSize * sizeof(PxU32), PX_FL);
@@ -639,15 +644,18 @@ void PxgTGSCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostA
 	mArtiSelfContactCounts.allocate(nbArticulations * sizeof(PxU32), PX_FL);
 	mArtiSelfJointCounts.allocate(nbArticulations * sizeof(PxU32), PX_FL);
 
-	mCudaContext->memcpyHtoDAsync(mArtiStaticContactIndices.getDevicePtr(), artiStaticContactIndices, sizeof(PxU32)*artiStaticContactIndSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiStaticJointIndices.getDevicePtr(), artiStaticJointIndices, sizeof(PxU32)*artiStaticJointSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiStaticContactCounts.getDevicePtr(), artiStaticContactCounts, sizeof(PxU32)*nbArticulations, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiStaticJointCounts.getDevicePtr(), artiStaticJointCounts, sizeof(PxU32)*nbArticulations, mStream);
+	if (!mCudaContext->isSingleStreamMode())
+	{
+		mCudaContext->memcpyHtoDAsync(mArtiStaticContactIndices.getDevicePtr(), artiStaticContactIndices, sizeof(PxU32)*artiStaticContactIndSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiStaticJointIndices.getDevicePtr(), artiStaticJointIndices, sizeof(PxU32)*artiStaticJointSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiStaticContactCounts.getDevicePtr(), artiStaticContactCounts, sizeof(PxU32)*nbArticulations, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiStaticJointCounts.getDevicePtr(), artiStaticJointCounts, sizeof(PxU32)*nbArticulations, mStream);
 
-	mCudaContext->memcpyHtoDAsync(mArtiSelfContactIndices.getDevicePtr(), artiSelfContactIndices, sizeof(PxU32)*artiSelfContactIndSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiSelfJointIndices.getDevicePtr(), artiSelfJointIndices, sizeof(PxU32)*artiSelfJointSize, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiSelfContactCounts.getDevicePtr(), artiSelfContactCounts, sizeof(PxU32)*nbArticulations, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiSelfJointCounts.getDevicePtr(), artiSelfJointCounts, sizeof(PxU32)*nbArticulations, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiSelfContactIndices.getDevicePtr(), artiSelfContactIndices, sizeof(PxU32)*artiSelfContactIndSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiSelfJointIndices.getDevicePtr(), artiSelfJointIndices, sizeof(PxU32)*artiSelfJointSize, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiSelfContactCounts.getDevicePtr(), artiSelfContactCounts, sizeof(PxU32)*nbArticulations, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiSelfJointCounts.getDevicePtr(), artiSelfJointCounts, sizeof(PxU32)*nbArticulations, mStream);
+	}
 
 	constructConstraintPrePrepDesc(*mPrePrepDesc, numConstraintBatchHeader, numStaticConstraintBatchHeader, numArticConstraintBatchHeader, numArtiStaticConstraintBatchHeader,
 		numArtiSelfConstraintBatchHeader, pData, reinterpret_cast<PxContact*>(cpuContactStreamBase), reinterpret_cast<PxContactPatch*>(cpuContactPatchStreamBase),
@@ -667,14 +675,20 @@ void PxgTGSCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostA
 
 	mRadixSort.constructRadixSortDesc(mRsDesc);
 
-	mCudaContext->memcpyHtoDAsync(mConstraintsPerPartition.getDevicePtr(), pData.constraintsPerPartition, sizeof(PxU32) * pData.numConstraintsPerPartition, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiConstraintsPerPartition.getDevicePtr(), pData.artiConstraintsPerPartition, sizeof(PxU32) * pData.numArtiConstraintsPerPartition, mStream);
-	mCudaContext->memcpyHtoDAsync(mConstraint1DBatchIndices.getDevicePtr(), data.constraint1DBatchIndices, sizeof(PxU32) * numDynamic1DConstraintBatches, mStream);
-	mCudaContext->memcpyHtoDAsync(mContactBatchIndices.getDevicePtr(), data.constraintContactBatchIndices, sizeof(PxU32) * numDynamicContactBatches, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiContactBatchIndices.getDevicePtr(), data.artiConstraintContactBatchIndices, sizeof(PxU32) * numArtiContactBatches, mStream);
-	mCudaContext->memcpyHtoDAsync(mArtiConstraint1dBatchIndices.getDevicePtr(), data.artiConstraint1dBatchindices, sizeof(PxU32) * numArti1dConstraintBatches, mStream);
+	if (!mCudaContext->isSingleStreamMode())
+	{
+		mCudaContext->memcpyHtoDAsync(mConstraintsPerPartition.getDevicePtr(), pData.constraintsPerPartition, sizeof(PxU32) * pData.numConstraintsPerPartition, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiConstraintsPerPartition.getDevicePtr(), pData.artiConstraintsPerPartition, sizeof(PxU32) * pData.numArtiConstraintsPerPartition, mStream);
+		mCudaContext->memcpyHtoDAsync(mConstraint1DBatchIndices.getDevicePtr(), data.constraint1DBatchIndices, sizeof(PxU32) * numDynamic1DConstraintBatches, mStream);
+		mCudaContext->memcpyHtoDAsync(mContactBatchIndices.getDevicePtr(), data.constraintContactBatchIndices, sizeof(PxU32) * numDynamicContactBatches, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiContactBatchIndices.getDevicePtr(), data.artiConstraintContactBatchIndices, sizeof(PxU32) * numArtiContactBatches, mStream);
+		mCudaContext->memcpyHtoDAsync(mArtiConstraint1dBatchIndices.getDevicePtr(), data.artiConstraint1dBatchindices, sizeof(PxU32) * numArti1dConstraintBatches, mStream);
+	}
 
-	mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
+	// Single-stream mode: skip bulk H2D (PAGEABLE source, not graph-capturable).
+	// Device buffer retains warmup values; variable fields patched via D2D in PxgContext.
+	if (!mCudaContext->isSingleStreamMode())
+		mCudaContext->memcpyHtoDAsync(dataBufferd, hostAllocator.mStart, (size_t)hostAllocator.mCurrentSize, mStream);
 
 	mCudaContext->memsetD32Async(solverBodyReferencesd, 0xFFFFFFFF, totalActiveBodyCount * numSlabs, mStream);
 

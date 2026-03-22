@@ -1341,10 +1341,8 @@ PxCUresult CudaCtx::memcpyHtoDAsync(CUdeviceptr dstDevice, const void* srcHost, 
 {
 	if (mIsInAbortMode)
 		return mLastResult;
-	// Single-stream mode: skip ALL H2D (device buffers retain warmup values)
-	if (mSingleStreamMode)
-		return CUDA_SUCCESS;
-
+	// H2D is NOT skipped in single-stream mode — caller-level skip handles this
+	// (gpuMemDMAUp/gpuMemDmaUpBodyData are skipped in mSingleStreamMode)
 	if (ByteCount > 0)
 	{
 		mLastResult = cuMemcpyHtoDAsync(dstDevice, srcHost, ByteCount, hStream);
