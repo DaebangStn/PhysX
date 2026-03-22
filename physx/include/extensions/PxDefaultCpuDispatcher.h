@@ -81,6 +81,7 @@ public:
 	\param[in] forceInline True to force inline execution.
 	*/
 	virtual void setForceInline(bool forceInline) { PX_UNUSED(forceInline); }
+	virtual void setGraphCaptureDebug(bool v) { PX_UNUSED(v); }
 };
 
 

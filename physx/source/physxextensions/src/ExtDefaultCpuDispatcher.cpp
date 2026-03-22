@@ -29,6 +29,8 @@
 #include "ExtDefaultCpuDispatcher.h"
 #include "ExtCpuWorkerThread.h"
 #include "ExtTaskQueueHelper.h"
+#include <cstdio>
+#include <cuda_runtime.h>
 #include "foundation/PxString.h"
 
 using namespace physx;
@@ -132,6 +134,19 @@ void Ext::DefaultCpuDispatcher::submitTask(PxBaseTask& task)
 	if(!mNumThreads || mForceInline)
 	{
 		// no worker threads (or forced inline for graph capture), run directly
+		if (mForceInline && mGraphCaptureDebug)
+		{
+			// Check capture status on the PhysX stream (= capture stream in single-stream mode)
+			cudaStreamCaptureStatus statusBefore = cudaStreamCaptureStatusNone;
+			cudaStreamGetCaptureInfo(static_cast<cudaStream_t>(mCaptureDebugStream), &statusBefore, nullptr);
+			runTask(task);
+			cudaStreamCaptureStatus statusAfter = cudaStreamCaptureStatusNone;
+			cudaStreamGetCaptureInfo(static_cast<cudaStream_t>(mCaptureDebugStream), &statusAfter, nullptr);
+			if (statusBefore == cudaStreamCaptureStatusActive && statusAfter != cudaStreamCaptureStatusActive)
+				fprintf(stderr, "[GRAPH BROKEN BY] %s (before=%d after=%d)\n", task.getName(), statusBefore, statusAfter);
+			task.release();
+			return;
+		}
 		runTask(task);
 		task.release();
 		return;
