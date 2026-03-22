@@ -47,16 +47,19 @@ namespace physx
 	*/
 	PX_INLINE void synchronizeStreams(PxCudaContext* cudaContext, const CUstream& parentStream, const CUstream& dependentStream)
 	{
+		// Skip sync when both streams are the same (single-stream / graph-capture mode)
+		if (parentStream == dependentStream) return;
+
 		CUevent ev = 0;
 		cudaContext->eventCreate(&ev, CU_EVENT_DISABLE_TIMING);
 
-		CUresult result = cudaContext->eventRecord(ev, parentStream);		
+		CUresult result = cudaContext->eventRecord(ev, parentStream);
 
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuEventRecord failed with error %i\n", result);
 		PX_ASSERT(result == CUDA_SUCCESS);
 
-		result = cudaContext->streamWaitEvent(dependentStream, ev);		
+		result = cudaContext->streamWaitEvent(dependentStream, ev);
 
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuStreamWaitEvent failed with error %i\n", result);
@@ -70,8 +73,8 @@ namespace physx
 	*/
 	PX_INLINE void synchronizeStreams(PxCudaContext* cudaContext, CUstream& parentStream, CUstream& dependentStream, CUevent& ev)
 	{
-		//CUevent ev;
-		//mCudaContext->eventCreate(&ev, CU_EVENT_DISABLE_TIMING);
+		// Skip sync when both streams are the same (single-stream / graph-capture mode)
+		if (parentStream == dependentStream) return;
 
 		CUresult result = cudaContext->eventRecord(ev, parentStream);
 		if (result != CUDA_SUCCESS)
@@ -84,9 +87,6 @@ namespace physx
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuStreamWaitEvent failed with error %i\n", result);
 
 		PX_ASSERT(result == CUDA_SUCCESS);
-
-		
-		//mCudaContext->eventDestroy(ev);
 	}
 
 	PX_FORCE_INLINE void* getMappedDevicePtr(PxCudaContext* cudaContext, void* cpuPtr)
