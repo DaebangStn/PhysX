@@ -41,6 +41,17 @@ namespace physx
 		PxU32 mPartitionEntryIndex;	//! index of partition edges for this partition
 	};
 
+	// Phase B: GPU-only contact registration mapping.
+	// One entry per narrowphase contact manager. Built on CPU, uploaded to GPU.
+	struct ContactArticMapping
+	{
+		PxNodeIndex node0;        // articulation node (or ground)
+		PxNodeIndex node1;        // ground node (or articulation)
+		PxU32 npIndex;            // narrowphase contact manager index
+		PxU32 edgeIndex;          // island edge index
+		PxU32 denseArticIdx;      // pre-computed dense articulation index (0..N-1), 0xFFFFFFFF = skip
+	};
+
 	// PT: stored in incremental partition code's mPartitionNodeArray,
 	// indexed by a partition edge's unique index.
 	struct PartitionNodeData

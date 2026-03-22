@@ -44,6 +44,10 @@
 #include "DyIslandManager.h"
 #include "PxgNarrowphaseCore.h"
 #include "PxsContactManager.h"
+#include "PxgPartitionNode.h"
+#include "PxgSolverConstraintDesc.h"
+#include "PxgKernelWrangler.h"
+#include "PxgKernelIndices.h"
 #include "CmFlushPool.h"
 
 // PT: TODO: this doesn't compile anymore these days
@@ -412,7 +416,18 @@ namespace physx
 		mGpuSolverCore = NULL;
 		mGpuPBDParticleSystemCore = NULL;
 
-		mMaxNumStaticPartitions = maxNumStaticPartitions;		
+		mMaxNumStaticPartitions = maxNumStaticPartitions;
+		mStaticContactMappingCount = 0;
+		mStaticContactMaxPerArtic = 8;
+		mStaticBufAllocSize = 0;
+		mStaticContactMapping_d = 0;
+		mStaticContactCounts_d = 0;
+		mStaticContactIndices_d = 0;
+		mStaticNodeArray_d = 0;
+		mStaticNpIndexArray_d = 0;
+		mStaticSolverConstants_d = 0;
+		mStaticPartIndexArray_d = 0;
+		mStaticUniqueIdCounter_d = 0;
 	}
 
 	PxgGpuContext::~PxgGpuContext()
@@ -503,6 +518,184 @@ namespace physx
 
 		// maybe this is also not needed if we have direct-GPU?
 		mGpuSolverCore->jointConstraintBlockPrePrepParallel(mNumConstraintBatches + mNumRigidStaticConstraintBatches + mNumArticConstraintBatches + mNumArtiStaticConstraintBatches + mNumArtiSelfConstraintBatches);
+	}
+
+	void PxgGpuContext::buildAndUploadContactMapping(CUstream stream)
+	{
+		PX_PROFILE_ZONE("buildAndUploadContactMapping", 0);
+
+		IG::IslandSim& islandSim = mIslandManager.getAccurateIslandSim();
+		const IG::CPUExternalData& islandCpu = islandSim.mCpuData;
+
+		// Build nodeToDenseIdx reverse map
+		PxgIslandContext& island = mIslandContextPool[0];
+		const PxU32 articulationStartIndex = island.mBodyStartIndex + island.mBodyCount;
+		PxNodeIndex* nodeIndices = mActiveNodeIndex.begin() + articulationStartIndex;
+		PxHashMap<PxU32, PxU32> nodeToDenseIdx;
+		for (PxU32 i = 0; i < mArticulationCount; ++i)
+			nodeToDenseIdx.insert(nodeIndices[i].index(), i);
+
+		// Count total contact managers across all narrowphase buckets
+		PxgGpuNarrowphaseCore* npCore = getNarrowphaseCore();
+		PxU32 totalCms = 0;
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket]) continue;
+			totalCms += npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+		}
+
+		// Build mapping on CPU (temporary pinned/host buffer)
+		PxArray<ContactArticMapping> mappings;
+		mappings.resize(totalCms);
+		PxU32 idx = 0;
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket]) continue;
+			PxgContactManagers& cms = npCore->mContactManagers[bucket]->mContactManagers;
+			const PxU32 nbCms = cms.mCpuContactManagerMapping.size();
+			for (PxU32 j = 0; j < nbCms; ++j)
+			{
+				PxsContactManager* cm = cms.mCpuContactManagerMapping[j];
+				ContactArticMapping& m = mappings[idx++];
+				if (!cm)
+				{
+					m.denseArticIdx = 0xFFFFFFFF;
+					continue;
+				}
+				const PxcNpWorkUnit& unit = cm->getWorkUnit();
+				if (unit.mFlags & PxcNpWorkUnitFlag::eDISABLE_RESPONSE)
+				{
+					m.denseArticIdx = 0xFFFFFFFF;
+					continue;
+				}
+				m.node0 = islandCpu.getNodeIndex1(unit.mEdgeIndex);
+				m.node1 = islandCpu.getNodeIndex2(unit.mEdgeIndex);
+				m.npIndex = unit.mNpIndex;
+				m.edgeIndex = unit.mEdgeIndex;
+
+				// Determine dense articulation index
+				PxNodeIndex articNode;
+				bool isStaticArtic = false;
+				if (m.node0.isArticulation() && (!m.node1.isValid() || islandSim.getNode(m.node1).isKinematic()))
+				{
+					articNode = m.node0;
+					isStaticArtic = true;
+				}
+				else if (m.node1.isArticulation() && (!m.node0.isValid() || islandSim.getNode(m.node0).isKinematic()))
+				{
+					articNode = m.node1;
+					isStaticArtic = true;
+				}
+
+				if (isStaticArtic)
+				{
+					const PxPair<const PxU32, PxU32>* entry = nodeToDenseIdx.find(articNode.index());
+					m.denseArticIdx = entry ? entry->second : 0xFFFFFFFF;
+				}
+				else
+				{
+					m.denseArticIdx = 0xFFFFFFFF;
+				}
+			}
+		}
+
+		mStaticContactMappingCount = idx;
+		mStaticContactMaxPerArtic = 8;  // conservative: max contacts per articulation
+
+		// Compute total allocation needed
+		const PxU32 maxTotalContacts = PxMax(idx, 1u);
+		const PxU64 totalNeeded =
+			idx * sizeof(ContactArticMapping) +                           // mapping
+			mArticulationCount * sizeof(PxU32) +                          // counts
+			mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32) + // indices
+			maxTotalContacts * sizeof(PartitionNodeData) +                // nodeArray
+			maxTotalContacts * sizeof(PxU32) +                            // npIndexArray
+			maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants) + // solverConsts
+			maxTotalContacts * sizeof(PartitionIndexData) +               // partIndexArray
+			sizeof(PxU32);                                                // uniqueIdCounter
+
+		// Allocate single device buffer (lazy, only grow)
+		if (mStaticBufAllocSize < totalNeeded)
+		{
+			freeStaticContactBuffers();
+			CUdeviceptr base = 0;
+			CUresult res = cuMemAlloc(&base, totalNeeded);
+			if (res != CUDA_SUCCESS)
+			{
+				PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL,
+					"cuMemAlloc for static contact buffers failed! size=%llu\n", (unsigned long long)totalNeeded);
+				return;
+			}
+
+			// Assign sub-ranges (128-byte aligned offsets not critical for correctness)
+			CUdeviceptr p = base;
+			mStaticContactMapping_d = p; p += idx * sizeof(ContactArticMapping);
+			mStaticContactCounts_d  = p; p += mArticulationCount * sizeof(PxU32);
+			mStaticContactIndices_d = p; p += mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32);
+			mStaticNodeArray_d      = p; p += maxTotalContacts * sizeof(PartitionNodeData);
+			mStaticNpIndexArray_d   = p; p += maxTotalContacts * sizeof(PxU32);
+			mStaticSolverConstants_d = p; p += maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants);
+			mStaticPartIndexArray_d = p; p += maxTotalContacts * sizeof(PartitionIndexData);
+			mStaticUniqueIdCounter_d = p;
+			mStaticBufAllocSize = totalNeeded;
+		}
+
+		// Upload mapping
+		PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
+		cudaCtx->memcpyHtoDAsync(mStaticContactMapping_d, mappings.begin(),
+			idx * sizeof(ContactArticMapping), stream);
+	}
+
+	void PxgGpuContext::launchBuildStaticContactLists(CUstream stream)
+	{
+		PX_PROFILE_ZONE("launchBuildStaticContactLists", 0);
+
+		PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
+
+		// Clear counts and counter
+		cudaCtx->memsetD32Async(mStaticContactCounts_d, 0, mArticulationCount, stream);
+		cudaCtx->memsetD32Async(mStaticUniqueIdCounter_d, 0, 1, stream);
+
+		if (mStaticContactMappingCount == 0)
+			return;
+
+		CUfunction func = getArticulationCore()->getKernelFunction(PxgKernelIds::BUILD_STATIC_CONTACT_LISTS);
+
+		CUdeviceptr mappingPtr = mStaticContactMapping_d;
+		PxU32 nCms = mStaticContactMappingCount;
+		CUdeviceptr countsPtr = mStaticContactCounts_d;
+		CUdeviceptr indicesPtr = mStaticContactIndices_d;
+		CUdeviceptr nodePtr = mStaticNodeArray_d;
+		CUdeviceptr npIdxPtr = mStaticNpIndexArray_d;
+		CUdeviceptr solverPtr = mStaticSolverConstants_d;
+		CUdeviceptr partIdxPtr = mStaticPartIndexArray_d;
+		PxU32 stride = mArticulationCount;
+		PxU32 maxPerArtic = mStaticContactMaxPerArtic;
+		CUdeviceptr counterPtr = mStaticUniqueIdCounter_d;
+
+		void* kernelParams[] = {
+			&mappingPtr, &nCms, &countsPtr, &indicesPtr,
+			&nodePtr, &npIdxPtr, &solverPtr, &partIdxPtr,
+			&stride, &maxPerArtic, &counterPtr
+		};
+
+		const PxU32 blockSize = 256;
+		const PxU32 numBlocks = (nCms + blockSize - 1) / blockSize;
+
+		CUresult res = cuLaunchKernel(func, numBlocks, 1, 1, blockSize, 1, 1, 0, stream, kernelParams, NULL);
+		if (res != CUDA_SUCCESS)
+			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL,
+				"GPU buildStaticContactListsLaunch fail! %d\n", res);
+	}
+
+	void PxgGpuContext::freeStaticContactBuffers()
+	{
+		if (mStaticContactMapping_d)
+		{
+			cuMemFree(mStaticContactMapping_d);
+			mStaticContactMapping_d = 0;
+			mStaticBufAllocSize = 0;
+		}
 	}
 
 	void PxgGpuContext::rebuildStaticContactListsDirect(physx::PxBaseTask* continuation,

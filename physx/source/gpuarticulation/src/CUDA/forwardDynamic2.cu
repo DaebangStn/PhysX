@@ -42,6 +42,8 @@
 #include "foundation/PxMath.h"
 #include "DyFeatherstoneArticulation.h"
 #include "PxgSolverCoreDesc.h"
+#include "PxgPartitionNode.h"
+#include "PxgSolverConstraintDesc.h"
 #include "PxsRigidBody.h"
 #include "PxArticulationTendonData.h"
 #include "foundation/PxMathUtils.h"
@@ -4215,5 +4217,73 @@ extern "C" __global__ void artiPushImpulse(
 			}
 		}
 	}
+}
+
+//=============================================================================
+// buildStaticContactListsKernel — Phase B: GPU-only contact list building
+//
+// Replaces CPU processLostFoundPatches + addStaticArticulationContactManager
+// + PxgBatchArticulationStaticConstraintPrePrepTask for mStaticContactsOnly.
+//
+// One thread per contact manager. Registers all contact managers (regardless
+// of nbPatches — constraint prep kernel handles empty contacts).
+//=============================================================================
+
+extern "C" __global__
+void buildStaticContactListsLaunch(
+	const ContactArticMapping* PX_RESTRICT mappings,
+	const PxU32 nContactManagers,
+	PxU32* PX_RESTRICT contactCounts,              // [nArticulations] — per-artic count
+	PxU32* PX_RESTRICT contactIndices,             // [nArticulations * maxPerArtic] — strided
+	PartitionNodeData* PX_RESTRICT nodeArray,      // [maxTotalContacts] — per-uniqueId
+	PxU32* PX_RESTRICT npIndexArray,               // [maxTotalContacts] — per-uniqueId
+	PxgSolverConstraintManagerConstants* PX_RESTRICT solverConsts,  // [maxTotalContacts]
+	PartitionIndexData* PX_RESTRICT partIndexArray, // [maxTotalContacts]
+	const PxU32 stride,                             // = nArticulations
+	const PxU32 maxPerArtic,                        // max contacts per articulation
+	PxU32* PX_RESTRICT globalCounter                // atomic uniqueId counter
+)
+{
+	const PxU32 i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= nContactManagers)
+		return;
+
+	const ContactArticMapping m = mappings[i];
+
+	// Skip invalid mappings (denseArticIdx == 0xFFFFFFFF means not an artic↔static contact)
+	if (m.denseArticIdx == 0xFFFFFFFF)
+		return;
+
+	const PxU32 uniqueId = atomicAdd(globalCounter, 1);
+	const PxU32 slot = atomicAdd(&contactCounts[m.denseArticIdx], 1);
+
+	// Overflow guard
+	if (slot >= maxPerArtic)
+		return;
+
+	// Per-articulation contact index (strided layout: [articIdx + slot * stride])
+	contactIndices[m.denseArticIdx + slot * stride] = uniqueId;
+
+	// Per-uniqueId solver data
+	PartitionNodeData nd;
+	nd.mNodeIndex0 = m.node0;
+	nd.mNodeIndex1 = m.node1;
+	nd.mNextIndex[0] = 0xFFFFFFFF;
+	nd.mNextIndex[1] = 0xFFFFFFFF;
+	nodeArray[uniqueId] = nd;
+
+	npIndexArray[uniqueId] = m.npIndex;
+
+	PxgSolverConstraintManagerConstants sc;
+	sc.mEdgeIndex = m.edgeIndex;
+	sc.mConstraintWriteBackIndex = 0;
+	solverConsts[uniqueId] = sc;
+
+	PartitionIndexData pid;
+	pid.mPartitionIndex = 0;
+	pid.mPatchIndex = 0;
+	pid.mCType = 2;  // eARTICULATION_CONTACT (eCONTACT_MANAGER=0 + articulationOffset=2)
+	pid.mPartitionEntryIndex = 0;
+	partIndexArray[uniqueId] = pid;
 }
 

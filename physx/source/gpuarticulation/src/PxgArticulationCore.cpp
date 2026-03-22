@@ -298,6 +298,11 @@ namespace physx
 		mCudaContext->memcpyHtoDAsync(mArticulationCoreDescd.getDevicePtr(), mArticulationCoreDesc, sizeof(PxgArticulationCoreDesc), stream);
 	}
 
+	CUfunction PxgArticulationCore::getKernelFunction(PxU32 kernelId)
+	{
+		return mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(kernelId);
+	}
+
 	void PxgArticulationCore::createStaticContactAndConstraintsBatch(const PxU32 nbArticulations)
 	{
 		if (nbArticulations)

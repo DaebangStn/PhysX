@@ -72,6 +72,7 @@ namespace physx
 		void gpuMemDmaUpArticulationDesc(const PxU32 offset, const PxU32 nbArticulations, PxReal dt, const PxVec3& gravity, const PxReal invLengthScale, const bool isExternalForcesEveryTgsIterationEnabled);
 		
 		void createStaticContactAndConstraintsBatch(const PxU32 nbArticulations);
+		CUfunction getKernelFunction(PxU32 kernelId);
 
 		PxU32 computeUnconstrainedVelocities(const PxU32 offset, const PxU32 nbArticulations, PxReal dt, const PxVec3& gravity, const PxReal invLengthScale, const bool isExternalForcesEveryTgsIterationEnabled, bool recomputeBlockFormat);
 		PxU32 setupInternalConstraints(const PxU32 nbArticulations, const PxReal stepDt, const PxReal dt, const PxReal invDt, const bool isTGSSolver);

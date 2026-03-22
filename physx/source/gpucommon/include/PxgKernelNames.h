@@ -617,4 +617,7 @@ KERNEL_DEF(sdf_FindHoles, "sdfFindHoles")
 KERNEL_DEF(sdf_ApplyHoleCorrections, "sdfApplyHoleCorrections")
 KERNEL_DEF(sdf_CalculateDenseGridPointCloud, "sdfCalculateDenseGridPointCloud")
 
+// Phase B: GPU-only static contact list building
+KERNEL_DEF(BUILD_STATIC_CONTACT_LISTS, "buildStaticContactListsLaunch")
+
 #endif

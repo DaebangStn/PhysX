@@ -33,6 +33,7 @@
 #include "PxSimulationStatistics.h"
 #include "PxgConstraintPartition.h"
 #include "PxgCudaMemoryAllocator.h"
+#include "PxgCudaBuffer.h"
 #include "PxgConstraintPrep.h"
 #include "PxvNphaseImplementationContext.h"
 
@@ -561,6 +562,24 @@ namespace physx
 		PxU32									mNumRigidStaticConstraintBatches;
 
 		bool									mHasForceThresholds;
+
+		// Phase B: GPU-only static contact list building (raw device pointers)
+		CUdeviceptr								mStaticContactMapping_d;     // ContactArticMapping[]
+		CUdeviceptr								mStaticContactCounts_d;      // PxU32[nArticulations]
+		CUdeviceptr								mStaticContactIndices_d;     // PxU32[nArticulations * maxPerArtic]
+		CUdeviceptr								mStaticNodeArray_d;          // PartitionNodeData[]
+		CUdeviceptr								mStaticNpIndexArray_d;       // PxU32[]
+		CUdeviceptr								mStaticSolverConstants_d;    // PxgSolverConstraintManagerConstants[]
+		CUdeviceptr								mStaticPartIndexArray_d;     // PartitionIndexData[]
+		CUdeviceptr								mStaticUniqueIdCounter_d;    // PxU32[1]
+		PxU32									mStaticContactMappingCount;
+		PxU32									mStaticContactMaxPerArtic;
+		PxU64									mStaticBufAllocSize;         // track allocation size
+
+		void									buildAndUploadContactMapping(CUstream stream);
+		void									launchBuildStaticContactLists(CUstream stream);
+		void									freeStaticContactBuffers();
+
 		const bool								mIsTGS;
 	    bool									mIsExternalForcesEveryTgsIterationEnabled;
 
