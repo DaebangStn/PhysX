@@ -483,7 +483,6 @@ namespace physx
 		PxgRadixSortBuffers	mRadixSort;
 
 		bool				mStaticContactsOnly = false;
-		bool				mStaticDMAUpDone = false;
 	};
 }
 

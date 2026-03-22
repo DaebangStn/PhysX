@@ -514,11 +514,14 @@ namespace physx
 		getArticulationCore()->setSolverStream(mGpuSolverCore->getStreamRef());
 		if (mGpuBp)
 			mGpuBp->overrideStream(externalStream);
-		// Enable single-stream mode on CudaContext — skips all event/sync operations
+		// Enable single-stream mode on CudaContext — skips all event/sync/H2D operations
 		getNarrowphaseCore()->mCudaContext->setSingleStreamMode(true);
-		getNarrowphaseCore()->mCudaContext->setTrackedStream(externalStream);
 		// Also skip context push/pop in CudaContextManager
 		getNarrowphaseCore()->mCudaContextManager->setSingleStreamMode(true);
+		// Single-stream mode requires mStaticContactsOnly (articulation-only, no dynamic rigids)
+		// This ensures all H2D copies are genuinely redundant.
+		PX_ASSERT(mIncrementalPartition.getStaticContactsOnly() &&
+		          "Single-stream mode requires mStaticContactsOnly (articulation-only scenes)");
 	}
 
 	//this is the pre-prepare code for block format joints loaded from the non-block format joints
@@ -1724,13 +1727,9 @@ namespace physx
 
 		const PxU32 maxCombinedSlabPartitions = mIncrementalPartition.getCombinedSlabMaxNbPartitions();
 
-		if (!mIncrementalPartition.getStaticContactsOnly()
-		    || !mGpuSolverCore->mStaticDMAUpDone)
-		{
-			mGpuSolverCore->gpuMemDmaUpBodyData(mSolverBodyDataPool, mSolverTxIDataPool, mIslandManager.getNbNodeHandles() + 1,
-				mNumConstraintBatches, mNumArticConstraintBatches, PxMax(1u, (mIncrementalPartition.getNbPartitions() + maxCombinedSlabPartitions - 1) / maxCombinedSlabPartitions),
-				nbStaticSlabs, mMaxNumStaticPartitions);
-		}
+		mGpuSolverCore->gpuMemDmaUpBodyData(mSolverBodyDataPool, mSolverTxIDataPool, mIslandManager.getNbNodeHandles() + 1,
+			mNumConstraintBatches, mNumArticConstraintBatches, PxMax(1u, (mIncrementalPartition.getNbPartitions() + maxCombinedSlabPartitions - 1) / maxCombinedSlabPartitions),
+			nbStaticSlabs, mMaxNumStaticPartitions);
 
 		//Allocate enough space for the friction patches now that we know how many we need after constraint partitioning
 		{
@@ -2082,33 +2081,24 @@ namespace physx
 
 		mGpuArticulationCore->allocDeltaVBuffer(nbSlabs, nbPartitions, mGpuSolverCore->getStream());
 
-		// Static-contacts-only + single-stream (graph capture): skip solver descriptor H2D
-		// after initial upload. Descriptors don't change (fixed scene), device buffer retains values.
-		// gpuMemDMAUp uploads from host → device, which contains non-pinned (pageable) memory
-		// that is not graph-capturable.
-		if (!mIncrementalPartition.getStaticContactsOnly()
-		    || !mGpuSolverCore->mStaticDMAUpDone)
-		{
-			mGpuSolverCore->mStaticDMAUpDone = true;
-			mGpuSolverCore->gpuMemDMAUp(*mPinnedMemoryAllocator, ppData, mSolverBodyPool.size(),
-				mConstraintBatchHeaders, mIslandContextPool, mNumIslandContextPool, pData,
-				mNumConstraintBatches, mNumRigidStaticConstraintBatches, mNumArticConstraintBatches, mNumArtiStaticConstraintBatches, mNumArtiSelfConstraintBatches, cData,
-				PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumContactBatches + mNumStaticRigidContactBatches), 4u * (mNumContactBatches + mNumStaticRigidContactBatches),
-				PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches), 4u * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches),
-				mTotalEdges, mTotalPreviousEdges,
-				nbSlabs,
-				maxCombinedSlabPartitions, mEnableStabilization, mPatchStreamAllocators[mCurrentContactStream]->mStart, mContactStreamAllocators[mCurrentContactStream]->mStart,
-				mForceStreamAllocator->mStart, mOutputIterator, mSolverBodyPool.size() - (mKinematicCount + 1), mKinematicCount + 1, mArticulationCount,
-				reinterpret_cast<Cm::UnAlignedSpatialVector*>(mGpuArticulationCore->getDeferredZ()),
-				reinterpret_cast<PxU32*>(mGpuArticulationCore->getArticulationDirty()),
-				reinterpret_cast<uint4*>(mGpuArticulationCore->getArticulationSlabMask()),
-				mGPUShapeInteractions, mGPURestDistances, mGPUTorsionalData, mArtiStaticContactIndices.begin(), mArtiStaticContactIndices.size(),
-				mArtiStaticJointIndices.begin(), mArtiStaticJointIndices.size(), mArtiStaticContactCounts.begin(), mArtiStaticJointCounts.begin(),
-				mArtiSelfContactIndices.begin(), mArtiSelfContactIndices.size(),
-				mArtiSelfJointIndices.begin(), mArtiSelfJointIndices.size(), mArtiSelfContactCounts.begin(), mArtiSelfJointCounts.begin(),
-				mRigidStaticContactIndices.begin(), mRigidStaticContactIndices.size(), mRigidStaticJointIndices.begin(), mRigidStaticJointIndices.size(),
-				mRigidStaticContactCounts.begin(), mRigidStaticJointCounts.begin(), mLengthScale, hasForceThresholds);
-		}
+		mGpuSolverCore->gpuMemDMAUp(*mPinnedMemoryAllocator, ppData, mSolverBodyPool.size(),
+			mConstraintBatchHeaders, mIslandContextPool, mNumIslandContextPool, pData,
+			mNumConstraintBatches, mNumRigidStaticConstraintBatches, mNumArticConstraintBatches, mNumArtiStaticConstraintBatches, mNumArtiSelfConstraintBatches, cData,
+			PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumContactBatches + mNumStaticRigidContactBatches), 4u * (mNumContactBatches + mNumStaticRigidContactBatches),
+			PXG_MAX_NUM_POINTS_PER_CONTACT_PATCH * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches), 4u * (mNumArtiContactBatches + mNumStaticArtiContactBatches + mNumSelfArtiContactBatches),
+			mTotalEdges, mTotalPreviousEdges,
+			nbSlabs,
+			maxCombinedSlabPartitions, mEnableStabilization, mPatchStreamAllocators[mCurrentContactStream]->mStart, mContactStreamAllocators[mCurrentContactStream]->mStart,
+			mForceStreamAllocator->mStart, mOutputIterator, mSolverBodyPool.size() - (mKinematicCount + 1), mKinematicCount + 1, mArticulationCount,
+			reinterpret_cast<Cm::UnAlignedSpatialVector*>(mGpuArticulationCore->getDeferredZ()),
+			reinterpret_cast<PxU32*>(mGpuArticulationCore->getArticulationDirty()),
+			reinterpret_cast<uint4*>(mGpuArticulationCore->getArticulationSlabMask()),
+			mGPUShapeInteractions, mGPURestDistances, mGPUTorsionalData, mArtiStaticContactIndices.begin(), mArtiStaticContactIndices.size(),
+			mArtiStaticJointIndices.begin(), mArtiStaticJointIndices.size(), mArtiStaticContactCounts.begin(), mArtiStaticJointCounts.begin(),
+			mArtiSelfContactIndices.begin(), mArtiSelfContactIndices.size(),
+			mArtiSelfJointIndices.begin(), mArtiSelfJointIndices.size(), mArtiSelfContactCounts.begin(), mArtiSelfJointCounts.begin(),
+			mRigidStaticContactIndices.begin(), mRigidStaticContactIndices.size(), mRigidStaticJointIndices.begin(), mRigidStaticJointIndices.size(),
+			mRigidStaticContactCounts.begin(), mRigidStaticJointCounts.begin(), mLengthScale, hasForceThresholds);
 
 		//Make sure that the GPU articulation work has completed now...
 		mGpuArticulationCore->syncUnconstrainedVelocities();

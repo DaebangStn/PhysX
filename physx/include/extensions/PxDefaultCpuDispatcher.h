@@ -82,7 +82,6 @@ public:
 	*/
 	virtual void setForceInline(bool forceInline) { PX_UNUSED(forceInline); }
 	virtual void setGraphCaptureDebug(bool v) { PX_UNUSED(v); }
-	virtual void setCaptureDebugStream(void* s) { PX_UNUSED(s); }
 };
 
 

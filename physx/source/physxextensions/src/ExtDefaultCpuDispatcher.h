@@ -65,7 +65,6 @@ namespace Ext
 		virtual			void											release()							PX_OVERRIDE;
 		virtual			void											setForceInline(bool v)			PX_OVERRIDE	{ mForceInline = v;				}
 		virtual			void											setGraphCaptureDebug(bool v)	PX_OVERRIDE	{ mGraphCaptureDebug = v;		}
-						void											setCaptureDebugStream(void* s)				{ mCaptureDebugStream = s;		}
 		virtual			void											setRunProfiled(bool runProfiled)	PX_OVERRIDE	{ mRunProfiled = runProfiled;	}
 		virtual			bool											getRunProfiled()	const			PX_OVERRIDE	{ return mRunProfiled;			}
 		//~PxDefaultCpuDispatcher
@@ -118,7 +117,6 @@ namespace Ext
 						bool											mRunProfiled;
 						bool											mForceInline = false;
 						bool											mGraphCaptureDebug = false;
-						void*										mCaptureDebugStream = nullptr; // cudaStream_t
 		const			PxDefaultCpuDispatcherWaitForWorkMode::Enum		mWaitForWorkMode;
 		const			PxU32											mYieldProcessorCount;
 	};
