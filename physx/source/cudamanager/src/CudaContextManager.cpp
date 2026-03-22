@@ -26,6 +26,7 @@
 
 #include "foundation/PxAssert.h"
 #include "foundation/PxAtomic.h"
+#include <unordered_map>
 #include "foundation/PxErrorCallback.h"
 #include "foundation/PxMath.h"
 #include "foundation/PxPreprocessor.h"
@@ -849,6 +850,7 @@ private:
 	bool mLaunchSynchronous;
 	bool mIsInAbortMode;
 	bool mSingleStreamMode = false;
+	std::unordered_map<void*, CUdeviceptr> mHostDevicePtrCache;
 
 public:
 	CudaCtx(PxDeviceAllocatorCallback* callback, bool launchSynchronous);
@@ -955,6 +957,12 @@ PxCUresult CudaCtx::memAlloc(CUdeviceptr *dptr, size_t bytesize)
 		return mLastResult;
 	}
 
+	if (mSingleStreamMode)
+	{
+		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemAlloc called during single-stream mode! size=%zu\n", bytesize);
+		*dptr = 0;
+		return CUDA_ERROR_NOT_SUPPORTED;
+	}
 	mLastResult = cuMemAlloc(dptr, bytesize);
 #if PX_STOMP_ALLOCATED_MEMORY
 	if(*dptr && bytesize > 0)
@@ -973,12 +981,22 @@ PxCUresult CudaCtx::memFree(CUdeviceptr dptr)
 {
 	if ((void*)dptr == NULL)
 		return mLastResult;
-
+	if (mSingleStreamMode)
+	{
+		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemFree called!\n");
+		return CUDA_ERROR_NOT_SUPPORTED;
+	}
  	return cuMemFree(dptr);
 }
 
 PxCUresult CudaCtx::memHostAlloc(void** pp, size_t bytesize, unsigned int Flags)
 {
+	if (mSingleStreamMode)
+	{
+		fprintf(stderr, "[GRAPH CAPTURE VIOLATION] cuMemHostAlloc called during single-stream mode! size=%zu\n", bytesize);
+		*pp = nullptr;
+		return CUDA_ERROR_NOT_SUPPORTED;
+	}
 	CUresult result = cuMemHostAlloc(pp, bytesize, Flags);
 #if PX_STOMP_ALLOCATED_MEMORY
 	if(*pp != NULL && bytesize > 0)
@@ -1001,7 +1019,19 @@ PxCUresult CudaCtx::memHostGetDevicePointer(CUdeviceptr* pdptr, void* p, unsigne
 		*pdptr = reinterpret_cast<CUdeviceptr>(p);
 		return CUDA_SUCCESS;
 	}
-	return cuMemHostGetDevicePointer(pdptr, p, Flags);
+	// Always check cache first (populated during warmup, used during capture)
+	auto it = mHostDevicePtrCache.find(p);
+	if (it != mHostDevicePtrCache.end())
+	{
+		*pdptr = it->second;
+		return CUDA_SUCCESS;
+	}
+	// Cache miss — call the actual API (works even in single-stream mode
+	// if we're not actively inside a graph capture).
+	CUresult result = cuMemHostGetDevicePointer(pdptr, p, Flags);
+	if (result == CUDA_SUCCESS)
+		mHostDevicePtrCache[p] = *pdptr;  // Cache for future use
+	return result;
 }
 
 PxCUresult CudaCtx::moduleLoadDataEx(CUmodule* module, const void* image, unsigned int numOptions, PxCUjit_option* options, void** optionValues)
