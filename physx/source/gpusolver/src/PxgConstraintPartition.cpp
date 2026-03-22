@@ -1958,6 +1958,33 @@ void PxgIncrementalPartition::updateIncrementalIslands(
 {
 	PX_PROFILE_ZONE("PxgIncrementalPartition::updateIncrementalIslands", mContextID);
 
+	if(mStaticContactsOnly)
+	{
+		// Run Part1+Part2 for bodySimManager registration (needed for contact tracking)
+		// Skip Part3 (compaction/accumulation) — no partitioned constraints.
+		updateIncrementalIslands_Part1(islandSim, islandManagerData, iterator, bodySimManager, jointManager);
+		updateIncrementalIslands_Part2(islandSim, islandManagerData, iterator, bodySimManager);
+
+		mNbPartitions = 0;
+		mTotalContacts = 0;
+		mTotalConstraints = 0;
+		mTotalArticulationContacts = 0;
+		mTotalArticulationConstraints = 0;
+		mNbContactBatches = mNbConstraintBatches = 0;
+		mNbArtiContactBatches = mNbArtiConstraintBatches = 0;
+		mMaxSlabCount = 0;
+		mDestroyedContactEdgeIndices.forceSize_Unsafe(0);
+		mCSlab.clear();
+
+		// Set edge node index pointer (needed by solver prep)
+		PX_ASSERT(islandSim.mGpuData);
+		islandSim.mGpuData->setEdgeNodeIndexPtr(mNpIndexArray.begin());
+
+		if(flushPool && continuation)
+			continuation->removeReference();
+		return;
+	}
+
 	if(flushPool && continuation)
 	{
 		if(gRunDefaultVersion)

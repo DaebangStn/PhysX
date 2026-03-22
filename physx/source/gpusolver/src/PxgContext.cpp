@@ -42,6 +42,8 @@
 #include "PxgSimulationCore.h"
 #include "PxgPBDParticleSystemCore.h"
 #include "DyIslandManager.h"
+#include "PxgNarrowphaseCore.h"
+#include "PxsContactManager.h"
 #include "CmFlushPool.h"
 
 // PT: TODO: this doesn't compile anymore these days
@@ -503,8 +505,202 @@ namespace physx
 		mGpuSolverCore->jointConstraintBlockPrePrepParallel(mNumConstraintBatches + mNumRigidStaticConstraintBatches + mNumArticConstraintBatches + mNumArtiStaticConstraintBatches + mNumArtiSelfConstraintBatches);
 	}
 
+	void PxgGpuContext::rebuildStaticContactListsDirect(physx::PxBaseTask* continuation,
+		const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex)
+	{
+		PX_PROFILE_ZONE("rebuildStaticContactListsDirect", 0);
+		printf("[rebuildStaticContactLists] ENTER artic=%u\n", mArticulationCount);
+
+		PxgBodySimManager& bodyManager = getSimulationController()->getBodySimManager();
+
+		PxgIslandContext& island = mIslandContextPool[0];
+		const PxU32 articulationStartIndex = island.mBodyStartIndex + island.mBodyCount;
+		PxNodeIndex* nodeIndices = mActiveNodeIndex.begin() + articulationStartIndex;
+
+		mArtiStaticConstraintBatchOffset = articulationConstraintBatchIndex;
+		mArtiStaticContactBatchOffset = articulationContactBatchIndex;
+
+		const PxU32 stride = mArticulationCount;
+
+		// Resize output arrays
+		mArtiStaticContactCounts.resize(stride);
+		mArtiStaticJointCounts.resize(stride);
+		mArtiSelfContactCounts.resize(stride);
+		mArtiSelfJointCounts.resize(stride);
+
+		// Clear counts
+		PxMemZero(mArtiStaticContactCounts.begin(), stride * sizeof(PxU32));
+		PxMemZero(mArtiStaticJointCounts.begin(), stride * sizeof(PxU32));
+		PxMemZero(mArtiSelfContactCounts.begin(), stride * sizeof(PxU32));
+		PxMemZero(mArtiSelfJointCounts.begin(), stride * sizeof(PxU32));
+
+		// Build nodeIndex → dense articulation index mapping
+		PxHashMap<PxU32, PxU32> nodeToDenseIdx;
+		for (PxU32 i = 0; i < stride; ++i)
+			nodeToDenseIdx.insert(nodeIndices[i].index(), i);
+
+		IG::IslandSim& islandSim = mIslandManager.getAccurateIslandSim();
+		const IG::CPUExternalData& islandCpu = islandSim.mCpuData;
+
+		// Count max contacts per articulation (first pass)
+		PxU32 totalContacts = 0;
+		PxU32 maxPerArtic = 0;
+
+		PxgGpuNarrowphaseCore* npCore = getNarrowphaseCore();
+		// Iterate convex-plane bucket (articulation ↔ ground contacts)
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket])
+				continue;
+			PxgContactManagers& cms = npCore->mContactManagers[bucket]->mContactManagers;
+			const PxU32 nbCms = cms.mCpuContactManagerMapping.size();
+			for (PxU32 j = 0; j < nbCms; ++j)
+			{
+				PxsContactManager* cm = cms.mCpuContactManagerMapping[j];
+				if (!cm) continue;
+				const PxcNpWorkUnit& unit = cm->getWorkUnit();
+				const PxsContactManagerOutput& output = mOutputIterator.getContactManagerOutput(unit.mNpIndex);
+				if (output.nbPatches == 0) continue;
+				if (unit.mFlags & PxcNpWorkUnitFlag::eDISABLE_RESPONSE) continue;
+
+				const PxNodeIndex node0 = islandCpu.getNodeIndex1(unit.mEdgeIndex);
+				const PxNodeIndex node1 = islandCpu.getNodeIndex2(unit.mEdgeIndex);
+
+				// Determine if this is artic ↔ static
+				PxNodeIndex articNode;
+				bool isStaticArtic = false;
+				if (node0.isArticulation() && (!node1.isValid() || islandSim.getNode(node1).isKinematic()))
+				{
+					articNode = node0;
+					isStaticArtic = true;
+				}
+				else if (node1.isArticulation() && (!node0.isValid() || islandSim.getNode(node0).isKinematic()))
+				{
+					articNode = node1;
+					isStaticArtic = true;
+				}
+
+				if (isStaticArtic)
+				{
+					const PxPair<const PxU32, PxU32>* entry = nodeToDenseIdx.find(articNode.index());
+					if (entry)
+						totalContacts += output.nbPatches;
+				}
+			}
+		}
+
+		// Resize index arrays
+		maxPerArtic = totalContacts > 0 ? (totalContacts / stride + 4) : 1;
+		mArtiStaticContactIndices.resize(maxPerArtic * stride);
+		mArtiStaticJointIndices.resize(0);
+		mArtiSelfContactIndices.resize(0);
+		mArtiSelfJointIndices.resize(0);
+
+		// Ensure partition data arrays are large enough
+		mIncrementalPartition.mNpIndexArray.reserve(totalContacts);
+		mIncrementalPartition.mNpIndexArray.resizeUninitialized(totalContacts);
+		mIncrementalPartition.mPartitionNodeArray.reserve(totalContacts);
+		mIncrementalPartition.mPartitionNodeArray.resizeUninitialized(totalContacts);
+		mIncrementalPartition.mPartitionIndexArray.reserve(totalContacts);
+		mIncrementalPartition.mPartitionIndexArray.resizeUninitialized(totalContacts);
+		if (totalContacts > mIncrementalPartition.mSolverConstants.size())
+			mIncrementalPartition.mSolverConstants.resize(totalContacts);
+
+		// Second pass: populate arrays
+		PxU32 uniqueId = 0;
+		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
+		{
+			if (!npCore->mContactManagers[bucket])
+				continue;
+			PxgContactManagers& cms = npCore->mContactManagers[bucket]->mContactManagers;
+			const PxU32 nbCms = cms.mCpuContactManagerMapping.size();
+			for (PxU32 j = 0; j < nbCms; ++j)
+			{
+				PxsContactManager* cm = cms.mCpuContactManagerMapping[j];
+				if (!cm) continue;
+				const PxcNpWorkUnit& unit = cm->getWorkUnit();
+				const PxsContactManagerOutput& output = mOutputIterator.getContactManagerOutput(unit.mNpIndex);
+				if (output.nbPatches == 0) continue;
+				if (unit.mFlags & PxcNpWorkUnitFlag::eDISABLE_RESPONSE) continue;
+
+				const PxNodeIndex node0 = islandCpu.getNodeIndex1(unit.mEdgeIndex);
+				const PxNodeIndex node1 = islandCpu.getNodeIndex2(unit.mEdgeIndex);
+
+				PxNodeIndex articNode;
+				bool isStaticArtic = false;
+				if (node0.isArticulation() && (!node1.isValid() || islandSim.getNode(node1).isKinematic()))
+				{
+					articNode = node0;
+					isStaticArtic = true;
+				}
+				else if (node1.isArticulation() && (!node0.isValid() || islandSim.getNode(node0).isKinematic()))
+				{
+					articNode = node1;
+					isStaticArtic = true;
+				}
+
+				if (!isStaticArtic)
+					continue;
+
+				const PxPair<const PxU32, PxU32>* entry = nodeToDenseIdx.find(articNode.index());
+				if (!entry)
+					continue;
+				const PxU32 denseIdx = entry->second;
+
+				for (PxU32 p = 0; p < output.nbPatches; ++p)
+				{
+					PX_ASSERT(uniqueId < totalContacts);
+
+					// Populate solver data arrays
+					mIncrementalPartition.mNpIndexArray[uniqueId] = unit.mNpIndex;
+
+					PartitionNodeData& nd = mIncrementalPartition.mPartitionNodeArray[uniqueId];
+					nd.mNodeIndex0 = node0;
+					nd.mNodeIndex1 = node1;
+					nd.mNextIndex[0] = 0xFFFFFFFF;
+					nd.mNextIndex[1] = 0xFFFFFFFF;
+
+					PartitionIndexData& id = mIncrementalPartition.mPartitionIndexArray[uniqueId];
+					id.mPatchIndex = PxTo8(p);
+					id.mCType = PxU8(IG::Edge::EdgeType::eCONTACT_MANAGER) + 2; // +2 = articulation offset
+
+					mIncrementalPartition.mSolverConstants[uniqueId].mEdgeIndex = unit.mEdgeIndex;
+
+					// Per-articulation contact index
+					PxU32 slot = mArtiStaticContactCounts[denseIdx];
+					mArtiStaticContactIndices[denseIdx + slot * stride] = uniqueId;
+					mArtiStaticContactCounts[denseIdx] = slot + 1;
+
+					uniqueId++;
+				}
+			}
+		}
+
+		// Also update bodySimManager max counts (needed by downstream code)
+		bodyManager.mMaxStaticArticContacts = maxPerArtic;
+		bodyManager.mMaxStaticArticJoints = 0;
+		bodyManager.mMaxSelfArticContacts = 0;
+		bodyManager.mMaxSelfArticJoints = 0;
+		bodyManager.mTotalStaticArticContacts = uniqueId;
+
+		static int sRebuildCount = 0;
+		if (sRebuildCount < 10)
+		{
+			printf("[rebuildStaticContactLists] frame=%d totalContacts=%u uniqueId=%u stride=%u maxPerArtic=%u\n",
+				sRebuildCount, totalContacts, uniqueId, stride, maxPerArtic);
+			sRebuildCount++;
+		}
+	}
+
 	void PxgGpuContext::doStaticArticulationConstraintPrePrep(physx::PxBaseTask* continuation, const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex)
 	{
+		// Phase B bypass temporarily disabled — debugging
+		// if (mIncrementalPartition.getStaticContactsOnly())
+		// {
+		//     rebuildStaticContactListsDirect(continuation, articulationConstraintBatchIndex, articulationContactBatchIndex);
+		//     return;
+		// }
+
 		PxgBodySimManager& bodyManager = getSimulationController()->getBodySimManager();
 
 		PxgIslandContext& island = mIslandContextPool[0];
@@ -2200,6 +2396,10 @@ void PxgGpuContext::update(	Cm::FlushPool& flushPool, PxBaseTask* continuation, 
 	mRecomputeArticulationBlockFormat = getSimulationController()->getRecomputeArticulationBlockFormat();
 
 	mBodyCount = bodyCount;
+
+	// Auto-detect: no dynamic rigid bodies → all contacts are artic↔static
+	// → CPU partition coloring is unnecessary (SOLVE_UNIFIED never launches)
+	mIncrementalPartition.setStaticContactsOnly(bodyCount == 0 && articulationCount > 0);
 
 	mPinnedMemoryAllocator->reset();
 

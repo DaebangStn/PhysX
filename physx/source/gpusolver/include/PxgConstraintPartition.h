@@ -288,7 +288,12 @@ public:	// PT: TODO: revisit after the dust settles
 
 	const PxU64					mContextID;
 
+	bool						mStaticContactsOnly = false;
+
 public:
+
+	void setStaticContactsOnly(bool v) { mStaticContactsOnly = v; }
+	bool getStaticContactsOnly() const { return mStaticContactsOnly; }
 
 	PxgIncrementalPartition(const PxVirtualAllocator& allocator, PxU32 maxNumPartitions, PxU64 contextID);
 	~PxgIncrementalPartition();

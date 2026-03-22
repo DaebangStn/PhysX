@@ -386,6 +386,8 @@ namespace physx
 
 		void								doStaticArticulationConstraintPrePrep(physx::PxBaseTask* continuation, const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex);
 
+		void								rebuildStaticContactListsDirect(physx::PxBaseTask* continuation, const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex);
+
 		void								doStaticRigidConstraintPrePrep(physx::PxBaseTask* continuation);
 		
 		void								doConstraintSolveGPU(PxU32 maxNodes, PxBitMapPinned& changedHandleMap);
