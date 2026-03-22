@@ -540,32 +540,30 @@ namespace physx
 	void PxgArticulationCore::syncUnconstrainedVelocities()
 	{
 		PX_PROFILE_ZONE("PxgArticulationCore.syncUnconstrainedVelocities", 0);
-		//KS - technically, we could hoist this forward to just after unconstrained, but then we'd need another event to sync on in the internal solver
+		// Skip event sync when all streams are unified (single-stream / graph-capture mode)
+		if (mStream == *mSolverStream) return;
 		mCudaContext->eventRecord(mComputeUnconstrainedEvent, mStream);
-		//Make mSolverStream wait for compute unconstrained velocities to finish!
 		mCudaContext->streamWaitEvent(*mSolverStream, mComputeUnconstrainedEvent);
-
 	}
 
 	void PxgArticulationCore::synchronizedStreams(CUstream bpStream, CUstream npStream)
 	{
 		PX_PROFILE_ZONE("PxgArticulationCore.synchronizedStreams", 0);
+		// Skip when all streams are the same (single-stream / graph-capture mode)
+		if (mStream == bpStream && mStream == npStream) return;
 
 		CUresult result = mCudaContext->eventRecord(mFlushArticulationDataEvent, mStream);
 		PX_ASSERT(result == CUDA_SUCCESS);
-
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuEventRecord failed\n");
 
 		result = mCudaContext->streamWaitEvent(bpStream, mFlushArticulationDataEvent);
 		PX_ASSERT(result == CUDA_SUCCESS);
-
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuStreamWaitEvent failed\n");
 
 		result = mCudaContext->streamWaitEvent(npStream, mFlushArticulationDataEvent);
 		PX_ASSERT(result == CUDA_SUCCESS);
-
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "SynchronizeStreams cuStreamWaitEvent failed\n");
 	}
@@ -1057,7 +1055,7 @@ namespace physx
 		PxScopedCudaLock _lock(*mCudaContextManager);
 		bool success = true;
 
-		if(startEvent)
+		if(startEvent && !mSingleStreamMode)
 		{
 			mCudaContext->streamWaitEvent(mStream, startEvent);
 		}
@@ -1129,7 +1127,11 @@ namespace physx
 				PX_ALWAYS_ASSERT();
 		}
 
-		if(finishEvent)
+		if(mSingleStreamMode)
+		{
+			// Single-stream: no event needed, no sync needed (all on same stream)
+		}
+		else if(finishEvent)
 		{
 			mCudaContext->eventRecord(finishEvent, mStream);
 		}
@@ -1307,7 +1309,7 @@ namespace physx
 		PxScopedCudaLock _lock(*mCudaContextManager);
 		bool success = true;
 
-		if(startEvent)
+		if(startEvent && !mSingleStreamMode)
 		{
 			mCudaContext->streamWaitEvent(mStream, startEvent);
 		}
@@ -1379,7 +1381,11 @@ namespace physx
 				PX_ALWAYS_ASSERT();
 		}
 
-		if(finishEvent)
+		if(mSingleStreamMode)
+		{
+			// Single-stream: no event/sync needed
+		}
+		else if(finishEvent)
 		{
 			mCudaContext->eventRecord(finishEvent, mStream);
 		}
@@ -1735,7 +1741,7 @@ namespace physx
 		PxScopedCudaLock _lock(*mCudaContextManager);
 		bool success = true;
 
-		if(startEvent)
+		if(startEvent && !mSingleStreamMode)
 		{
 			mCudaContext->streamWaitEvent(mStream, startEvent);
 		}
@@ -1969,7 +1975,11 @@ namespace physx
 				PX_ALWAYS_ASSERT();
 		}
 
-		if(finishEvent)
+		if(mSingleStreamMode)
+		{
+			// Single-stream: no event/sync needed
+		}
+		else if(finishEvent)
 		{
 			mCudaContext->eventRecord(finishEvent, mStream);
 		}

@@ -116,7 +116,7 @@ namespace physx
 		PxU32 getNbActiveArticulations() const { return mNbActiveArticulation; }
 
 		CUstream getStream() { return mStream; }
-		void overrideStream(CUstream s) { mStream = s; }
+		void overrideStream(CUstream s) { mStream = s; mSingleStreamMode = true; }
 
 		CUevent getFlushArticulationDataEvent() { return mFlushArticulationDataEvent; }
 
@@ -163,6 +163,7 @@ namespace physx
 		CUstream*							mSolverStream; 
 		CUevent								mFinishEvent;
 		CUevent								mFlushArticulationDataEvent;
+		bool								mSingleStreamMode = false;
 
 		PxgGpuContext*						mGpuContext;
 

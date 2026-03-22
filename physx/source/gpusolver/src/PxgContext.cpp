@@ -43,6 +43,7 @@
 #include "PxgPBDParticleSystemCore.h"
 #include "DyIslandManager.h"
 #include "PxgNarrowphaseCore.h"
+#include "PxgCudaBroadPhaseSap.h"
 #include "PxsContactManager.h"
 #include "PxgPartitionNode.h"
 #include "PxgSolverConstraintDesc.h"
@@ -510,8 +511,11 @@ namespace physx
 		mGpuSolverCore->overrideStream(externalStream);
 		getNarrowphaseCore()->overrideStream(externalStream);
 		getArticulationCore()->overrideStream(externalStream);
-		// Update solver stream pointer in articulation core (it holds a pointer to solver's mStream)
 		getArticulationCore()->setSolverStream(mGpuSolverCore->getStreamRef());
+		if (mGpuBp)
+			mGpuBp->overrideStream(externalStream);
+		// Enable single-stream mode on CudaContext — skips all event/sync operations
+		getNarrowphaseCore()->mCudaContext->setSingleStreamMode(true);
 	}
 
 	//this is the pre-prepare code for block format joints loaded from the non-block format joints

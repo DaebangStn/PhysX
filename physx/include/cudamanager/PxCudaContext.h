@@ -181,6 +181,8 @@ namespace physx
 		virtual void setAbortMode(bool abort) = 0;
 
 		virtual bool isInAbortMode() = 0;
+
+		virtual void setSingleStreamMode(bool v) { PX_UNUSED(v); }
 	};
 
 #if !PX_DOXYGEN

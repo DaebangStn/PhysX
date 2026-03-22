@@ -843,9 +843,12 @@ private:
 	CUresult mLastResult;
 	bool mLaunchSynchronous;
 	bool mIsInAbortMode;
+	bool mSingleStreamMode = false;
 
 public:
 	CudaCtx(PxDeviceAllocatorCallback* callback, bool launchSynchronous);
+
+	void setSingleStreamMode(bool v) PX_OVERRIDE PX_FINAL { mSingleStreamMode = v; }
 	~CudaCtx();
 
 	// PxCudaContext
@@ -1064,6 +1067,8 @@ PxCUresult CudaCtx::streamWaitEvent(CUstream hStream, CUevent hEvent, unsigned i
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Single-stream: no cross-stream sync needed
 
 	mLastResult = cuStreamWaitEvent(hStream, hEvent, Flags);
 	return mLastResult;
@@ -1090,6 +1095,8 @@ PxCUresult CudaCtx::streamSynchronize(CUstream hStream)
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Single-stream: sync not needed (graph-capture safe)
 
 	mLastResult = cuStreamSynchronize(hStream);
 	return mLastResult;
@@ -1111,6 +1118,8 @@ PxCUresult CudaCtx::eventRecord(CUevent hEvent, CUstream hStream)
 {
 	if (mIsInAbortMode)
 		return mLastResult;
+	if (mSingleStreamMode)
+		return CUDA_SUCCESS;  // Single-stream: events not needed
 
 	mLastResult = cuEventRecord(hEvent, hStream);
 	return mLastResult;
