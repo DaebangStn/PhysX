@@ -629,6 +629,7 @@ namespace physx
 		void refreshContactManager(PxsContactManager* manager, PxsContactManagerOutput* cmOutputs, PxgContactManagerInput& input, const PxU32 bucketId);
 
 		void removeLostPairs();
+		void launchUpdateContactManagersGPU();  // GPU CM lifecycle (found/lost pairs)
 		void appendContactManagers(PxsContactManagerOutput* cmOutputs, PxU32 nbFallbackPairs);
 
 		void prepareTempContactManagers();

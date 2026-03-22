@@ -398,6 +398,11 @@ void PxgCMGpuDiscreteUpdateTask::runInternal()
 
 	mContext->mMaxPatches = 1;
 
+	// GPU CM update: in single-stream mode, update CM input array from
+	// broadphase found/lost pairs directly on device (no CPU processing)
+	if (npCore->mCudaContext->isSingleStreamMode())
+		npCore->launchUpdateContactManagersGPU();
+
 	for (PxU32 i = GPU_BUCKET_ID::eConvex; i < GPU_BUCKET_ID::eCount; ++i)
 	{
 		GPU_BUCKET_ID::Enum type = GPU_BUCKET_ID::Enum(i);

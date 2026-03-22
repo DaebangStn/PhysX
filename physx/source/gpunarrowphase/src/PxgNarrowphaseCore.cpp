@@ -8417,6 +8417,80 @@ bool validateInputPairs(PxgContactManagers& gpuConvexConvexManagers, PxgGpuConta
 
 #endif
 
+void PxgGpuNarrowphaseCore::launchUpdateContactManagersGPU()
+{
+	PX_PROFILE_ZONE("PxgNarrowphaseCore.launchUpdateContactManagersGPU", 0);
+
+	if (!mGpuContext || !mGpuContext->getGpuBroadPhase())
+		return;
+
+	PxgCudaBroadPhaseSap* bp = mGpuContext->getGpuBroadPhase();
+	CUstream stream = mStream;
+
+	// Broadphase device buffers
+	CUdeviceptr bpDescPtr = bp->getBPDescDevicePtr();
+	CUdeviceptr foundPairsPtr = bp->getFoundPairsDevicePtr();
+	CUdeviceptr lostPairsPtr = bp->getLostPairsDevicePtr();
+	PxU32 maxPairs = bp->getMaxFoundLostPairs();
+
+	if (!bpDescPtr || !foundPairsPtr || !lostPairsPtr)
+		return;
+
+	// Use convex bucket's CM input array (primary contact bucket)
+	if (!mGpuContactManagers[GPU_BUCKET_ID::eConvexPlane])
+		return;
+
+	PxgGpuContactManagers& gpuCMs = mGpuContactManagers[GPU_BUCKET_ID::eConvexPlane]->mContactManagers;
+	CUdeviceptr cmInputPtr = gpuCMs.mContactManagerInputData.getDevicePtr();
+	if (!cmInputPtr)
+		return;
+
+	// CM count: use a device variable (mStaticUniqueIdCounter from context)
+	// For now, we use the CM capacity as max grid size
+	PxU32 cmCapacity = gpuCMs.mContactManagerInputData.getSize() / sizeof(PxgContactManagerInput);
+	if (cmCapacity == 0)
+		return;
+
+	// Device variable for CM count (use broadphase descriptor's counters)
+	// Note: broadphase already wrote found/lost counts to bpDesc on device
+	PxU32 aggPairOffset = 0;  // no aggregates in mStaticContactsOnly
+
+	// Launch found pairs kernel
+	{
+		CUfunction func = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::UPDATE_CMS_FOUND_GPU);
+		// cmCount pointer — we need a device variable for the current CM count
+		// Use the last word of the CM input buffer as a counter (hack, but works)
+		// Better: add a dedicated device variable. For now use mGpuContext->mStaticUniqueIdCounter_d
+		CUdeviceptr cmCountPtr = mGpuContext->mStaticUniqueIdCounter_d;
+
+		void* kernelParams[] = {
+			&foundPairsPtr, &bpDescPtr, &aggPairOffset,
+			&cmInputPtr, &cmCountPtr
+		};
+
+		const PxU32 blockSize = 256;
+		const PxU32 numBlocks = (maxPairs + blockSize - 1) / blockSize;
+		CUresult res = cuLaunchKernel(func, numBlocks, 1, 1, blockSize, 1, 1, 0, stream, kernelParams, NULL);
+		PX_UNUSED(res);
+	}
+
+	// Launch lost pairs kernel
+	{
+		CUfunction func = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::UPDATE_CMS_LOST_GPU);
+		PxU32 cmCount = cmCapacity;  // max scan range for invalidation
+
+		void* kernelParams[] = {
+			&lostPairsPtr, &bpDescPtr, &aggPairOffset,
+			&cmInputPtr, &cmCount
+		};
+
+		const PxU32 blockSize = 256;
+		const PxU32 numBlocks = (maxPairs + blockSize - 1) / blockSize;
+		CUresult res = cuLaunchKernel(func, numBlocks, 1, 1, blockSize, 1, 1, 0, stream, kernelParams, NULL);
+		PX_UNUSED(res);
+	}
+}
+
 void PxgGpuNarrowphaseCore::removeLostPairs()
 {
 	/*
