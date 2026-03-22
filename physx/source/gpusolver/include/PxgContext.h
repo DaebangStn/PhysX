@@ -585,6 +585,9 @@ namespace physx
 		// GPU-only contact mapping: node→denseIdx lookup table (device)
 		CUdeviceptr								mNodeToDenseIdx_d = 0;
 		PxU32									mNodeToDenseIdxSize = 0;
+		// Max CM counts per bucket (recorded during warmup, used for fixed-size graph launch)
+		PxU32									mMaxCmsPerBucket[GPU_BUCKET_ID::eCount] = {};
+		PxU32									mMaxTotalCms = 0;
 
 		const bool								mIsTGS;
 	    bool									mIsExternalForcesEveryTgsIterationEnabled;

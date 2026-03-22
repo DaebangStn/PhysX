@@ -569,13 +569,17 @@ namespace physx
 			nodeToDenseIdx.insert(nodeIndices[i].index(), i);
 
 		// Count total contact managers across all narrowphase buckets
+		// Also record max per-bucket for graph-capturable fixed-size launch
 		PxgGpuNarrowphaseCore* npCore = getNarrowphaseCore();
 		PxU32 totalCms = 0;
 		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
 		{
 			if (!npCore->mContactManagers[bucket]) continue;
-			totalCms += npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+			PxU32 n = npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+			totalCms += n;
+			mMaxCmsPerBucket[bucket] = PxMax(mMaxCmsPerBucket[bucket], n);
 		}
+		mMaxTotalCms = PxMax(mMaxTotalCms, totalCms);
 
 		// Build mapping on CPU (only used in normal mode / warmup)
 		PxArray<ContactArticMapping> mappings;
@@ -709,47 +713,24 @@ namespace physx
 		// nodeToDenseIdx must be built during warmup (buildAndUploadContactMapping)
 		PX_ASSERT(mNodeToDenseIdx_d != 0 && "nodeToDenseIdx not initialized — warmup must run first");
 
-		// Count total contact managers across all buckets
-		PxU32 totalCms = 0;
-		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
-		{
-			if (!npCore->mContactManagers[bucket]) continue;
-			totalCms += npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
-		}
-
-		if (totalCms == 0)
-		{
-			mStaticContactMappingCount = 0;
-			return;
-		}
-
-		// Ensure mapping buffer is large enough
-		const PxU64 mappingBytes = totalCms * sizeof(ContactArticMapping);
-		if (mStaticBufAllocSize < mappingBytes + sizeof(PxU32))
-		{
-			// Need to re-run buildAndUploadContactMapping in normal mode first
-			// This shouldn't happen if warmup was sufficient
-			PxGetFoundation().error(PxErrorCode::eDEBUG_WARNING, PX_FL,
-				"[buildContactMappingGPU] Buffer too small, falling back to CPU path\n");
-			return;
-		}
+		// Use max CM counts from warmup (fixed for graph replay)
+		PX_ASSERT(mMaxTotalCms > 0 && "Max CM count not recorded — warmup must run first");
 
 		// Clear valid count
 		cudaCtx->memsetD32Async(mStaticUniqueIdCounter_d, 0, 1, stream);
 
-		// Get GPU contact manager input data (concatenate across buckets)
-		// For simplicity, launch one kernel per bucket
+		// Launch one kernel per bucket with max count (graph-safe: fixed grid size)
 		CUfunction func = getArticulationCore()->getKernelFunction(PxgKernelIds::BUILD_CONTACT_MAPPING_GPU);
 		CUdeviceptr shapeRemapPtr = npCore->mGpuShapesManager.mGpuShapesRemapTableBuffer.getDevicePtr();
 
 		PxU32 cmOffset = 0;
 		for (PxU32 bucket = GPU_BUCKET_ID::eConvex; bucket < GPU_BUCKET_ID::eCount; ++bucket)
 		{
-			if (!npCore->mContactManagers[bucket]) continue;
-			PxgGpuContactManagers& gpuCMs = npCore->getExistingGpuContactManagers(GPU_BUCKET_ID::Enum(bucket));
-			PxU32 nCms = npCore->mContactManagers[bucket]->mContactManagers.mCpuContactManagerMapping.size();
+			PxU32 nCms = mMaxCmsPerBucket[bucket];  // fixed max from warmup
 			if (nCms == 0) continue;
+			if (!npCore->mContactManagers[bucket]) continue;
 
+			PxgGpuContactManagers& gpuCMs = npCore->getExistingGpuContactManagers(GPU_BUCKET_ID::Enum(bucket));
 			CUdeviceptr cmInputPtr = gpuCMs.mContactManagerInputData.getDevicePtr();
 			CUdeviceptr nodeToDensePtr = mNodeToDenseIdx_d;
 			CUdeviceptr mappingOutPtr = mStaticContactMapping_d + cmOffset * sizeof(ContactArticMapping);
@@ -770,7 +751,7 @@ namespace physx
 			cmOffset += nCms;
 		}
 
-		mStaticContactMappingCount = totalCms;
+		mStaticContactMappingCount = mMaxTotalCms;
 	}
 
 	void PxgGpuContext::launchBuildStaticContactLists(CUstream stream)
