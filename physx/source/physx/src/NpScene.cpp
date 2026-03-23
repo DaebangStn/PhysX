@@ -3717,6 +3717,13 @@ void NpScene::overrideCudaStream(CUstream stream)
 		sc->overrideCudaStream(stream);
 }
 
+void NpScene::setMaxCollisionPairs(PxU32 maxPairs)
+{
+	PxsSimulationController* sc = mScene.getSimulationController();
+	if (sc)
+		sc->setMaxCollisionPairs(maxPairs);
+}
+
 void NpScene::simulateDirect(PxReal elapsedTime)
 {
 	// Minimal task framework setup — Sc::Scene::simulate needs a valid

@@ -197,8 +197,15 @@ namespace physx
 		mCudaContext->memsetD32Async(mDeltaVs.getDevicePtr(), 0, (totalArticulations * maxLinks * nbSlabs * sizeof(Cm::UnAlignedSpatialVector)) / sizeof(PxU32), stream);
 		mCudaContext->memsetD32Async(mSlabHasChanges.getDevicePtr(), 0xFFFFFFFF, totalArticulations*nbSlabs * 2, stream);
 
-		// Single-stream: device descriptor retains warmup values (pointers unchanged)
-		if (!mCudaContext->isSingleStreamMode())
+		if (mCudaContext->isSingleStreamMode())
+		{
+			// GPU-only: patch nbSlabs/nbPartitions directly on device descriptor.
+			// Pointer fields (impulses, slabHasChanges, etc.) don't change — buffers never reallocate.
+			CUdeviceptr desc = mArticulationCoreDescd.getDevicePtr();
+			mCudaContext->memsetD32Async(desc + offsetof(PxgArticulationCoreDesc, nbSlabs), nbSlabs, 1, stream);
+			mCudaContext->memsetD32Async(desc + offsetof(PxgArticulationCoreDesc, nbPartitions), nbPartitions, 1, stream);
+		}
+		else
 		{
 			mArticulationCoreDesc->impulses = reinterpret_cast<Cm::UnAlignedSpatialVector*>(mDeltaVs.getDevicePtr());
 			mArticulationCoreDesc->slabHasChanges = reinterpret_cast<uint2*>(mSlabHasChanges.getDevicePtr());
@@ -217,12 +224,11 @@ namespace physx
 	{
 		if (mCudaContext->isSingleStreamMode())
 		{
-			// Skip full H2D — device descriptor retains warmup pointer values.
-			// Only patch articulationOffset (changes per solver phase) via memset.
+			// GPU-only: patch per-frame scalar fields on device descriptor.
 			CUstream stream = mStream;
-			mCudaContext->memsetD32Async(
-				mArticulationCoreDescd.getDevicePtr() + offsetof(PxgArticulationCoreDesc, articulationOffset),
-				offset, 1, stream);
+			CUdeviceptr desc = mArticulationCoreDescd.getDevicePtr();
+			mCudaContext->memsetD32Async(desc + offsetof(PxgArticulationCoreDesc, articulationOffset), offset, 1, stream);
+			mCudaContext->memsetD32Async(desc + offsetof(PxgArticulationCoreDesc, nbArticulations), nbArticulations, 1, stream);
 			return;
 		}
 		CUstream stream = mStream; //*mSolverStream

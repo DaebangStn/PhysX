@@ -8458,10 +8458,9 @@ void PxgGpuNarrowphaseCore::launchUpdateContactManagersGPU()
 	// Launch found pairs kernel
 	{
 		CUfunction func = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::UPDATE_CMS_FOUND_GPU);
-		// cmCount pointer — we need a device variable for the current CM count
-		// Use the last word of the CM input buffer as a counter (hack, but works)
-		// Better: add a dedicated device variable. For now use mGpuContext->mStaticUniqueIdCounter_d
-		CUdeviceptr cmCountPtr = mGpuContext->mStaticUniqueIdCounter_d;
+		CUdeviceptr cmCountPtr = mCmCount_d;
+		if (!cmCountPtr)
+			return;
 
 		void* kernelParams[] = {
 			&foundPairsPtr, &bpDescPtr, &aggPairOffset,

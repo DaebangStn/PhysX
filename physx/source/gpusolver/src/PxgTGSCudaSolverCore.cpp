@@ -503,8 +503,6 @@ void PxgTGSCudaSolverCore::gpuMemDMAUp(PxgPinnedHostLinearMemoryAllocator& hostA
 {
 	PX_PROFILE_ZONE("GpuDynamics.DMAUp", 0);
 
-	// Single-stream mode: device buffers + pointers from warmup are still valid.
-	// Skip everything — no realloc, no pointer recalc, no H2D.
 	if (mCudaContext->isSingleStreamMode())
 		return;
 

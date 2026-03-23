@@ -4434,6 +4434,11 @@ namespace physx
 		mDynamicContext->overrideAllStreams(stream);
 	}
 
+	void PxgSimulationController::setMaxCollisionPairs(PxU32 maxPairs)
+	{
+		mDynamicContext->setMaxCollisionPairs(maxPairs);
+	}
+
 #if PX_SUPPORT_OMNI_PVD
 	void PxgSimulationController::setOVDCallbacks(PxsSimulationControllerOVDCallbacks& ovdCallbacks)
 	{

@@ -389,6 +389,7 @@ namespace physx
 
 		void								rebuildStaticContactListsDirect(physx::PxBaseTask* continuation, const PxU32 articulationConstraintBatchIndex, const PxU32 articulationContactBatchIndex);
 		void								overrideAllStreams(CUstream externalStream);
+		void								setMaxCollisionPairs(PxU32 maxPairs);
 
 		void								doStaticRigidConstraintPrePrep(physx::PxBaseTask* continuation);
 		

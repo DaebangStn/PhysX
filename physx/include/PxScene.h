@@ -1755,6 +1755,15 @@ class PxScene : public PxSceneSQSystem
 	virtual void overrideCudaStream(CUstream stream) { PX_UNUSED(stream); }
 
 	/**
+	\brief Set max collision pairs for GPU graph capture.
+
+	Pre-allocates narrowphase contact manager buffers to this fixed size
+	so kernel launch grid sizes are constant (graph-capturable).
+	Must be called after overrideCudaStream() and before graph capture.
+	*/
+	virtual void setMaxCollisionPairs(PxU32 maxPairs) { PX_UNUSED(maxPairs); }
+
+	/**
 	\brief Direct simulation without task chain or fetchResults.
 
 	Bypasses NpScene-level task framework, stage validation, and callbacks.

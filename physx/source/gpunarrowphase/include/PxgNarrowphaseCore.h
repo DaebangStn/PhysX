@@ -630,6 +630,8 @@ namespace physx
 
 		void removeLostPairs();
 		void launchUpdateContactManagersGPU();  // GPU CM lifecycle (found/lost pairs)
+		PxU32								mMaxCollisionPairs = 0;  // config: max collision pairs for graph capture
+		CUdeviceptr							mCmCount_d = 0;         // device variable: current CM count (monotonically increasing)
 		void appendContactManagers(PxsContactManagerOutput* cmOutputs, PxU32 nbFallbackPairs);
 
 		void prepareTempContactManagers();

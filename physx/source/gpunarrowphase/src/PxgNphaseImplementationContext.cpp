@@ -80,7 +80,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	managersGPU.mLostAndTotalReportedPairsCountPinned->y = 0;
 	managersGPU.mLostAndTotalReportedPairsCountPinned->x = 0;
 
-	const PxU32 numTests = managers.mCpuContactManagerMapping.size();
+	PxU32 numTests = managers.mCpuContactManagerMapping.size();
 
 	if (numTests == 0)
 		return;
@@ -91,7 +91,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	{
 	case GPU_BUCKET_ID::eConvex:
 		mContext->mGpuNarrowphaseCore->testSDKConvexConvexGjkEpaGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -101,7 +101,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 		break;
 	case GPU_BUCKET_ID::eConvexPlane:
 		mContext->mGpuNarrowphaseCore->testSDKConvexPlaneGjkEpaGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -112,7 +112,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eConvexTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKConvexTriMeshSATGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -123,7 +123,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eConvexHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKConvexHeightfieldGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -133,7 +133,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	}
 	case GPU_BUCKET_ID::eConvexCorePlane:
 		mContext->mGpuNarrowphaseCore->testSDKConvexCorePlaneGjkEpaGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -142,7 +142,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 		break;
 	case GPU_BUCKET_ID::eConvexCoreConvex:
 		mContext->mGpuNarrowphaseCore->testSDKConvexCoreConvexGjkEpaGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -151,7 +151,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 		break;
 	case GPU_BUCKET_ID::eConvexCoreTrimesh:
 		mContext->mGpuNarrowphaseCore->testSDKConvexCoreTrimeshGjkEpaGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -161,15 +161,15 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 		break;
 	case GPU_BUCKET_ID::eConvexCoreTetmesh:
 		mContext->mGpuNarrowphaseCore->testSDKConvexCoreTetmeshGjkEpaGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	case GPU_BUCKET_ID::eConvexCoreClothmesh:
 		mContext->mGpuNarrowphaseCore->testSDKConvexCoreClothmeshGjkEpaGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	case GPU_BUCKET_ID::eSphere:
 	{
-		mContext->mGpuNarrowphaseCore->testSDKSphereGpu(managersGPU, managers.mCpuContactManagerMapping.size(),
+		mContext->mGpuNarrowphaseCore->testSDKSphereGpu(managersGPU, numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -180,7 +180,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	}
 	case GPU_BUCKET_ID::eBoxBox:
 	{
-		mContext->mGpuNarrowphaseCore->testSDKBoxBoxGpu(managersGPU, managers.mCpuContactManagerMapping.size(),
+		mContext->mGpuNarrowphaseCore->testSDKBoxBoxGpu(managersGPU, numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -192,7 +192,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eSphereTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSphereTriMeshSATGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -203,7 +203,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eSphereHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSphereHeightfieldGpu(managersGPU,
-			mContext->mContext.getCreateAveragePoint(), managers.mCpuContactManagerMapping.size(),
+			mContext->mContext.getCreateAveragePoint(), numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -214,7 +214,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eTrianglePlane:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKTriMeshPlaneGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size(),
+			numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -225,7 +225,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eTriangleHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKTriMeshHeightfieldGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size(),
+			numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -237,7 +237,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eTriangleTriangle:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKTriMeshTriMeshGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size(),
+			numTests,
 			mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mContactStreamPool->mDataStream,
 			mContext->mContext.mForceAndIndiceStreamPool->mDataStream,
 			mContext->mContext.mPatchStreamPool->mDataStreamSize, mContext->mContext.mContactStreamPool->mDataStreamSize,
@@ -248,130 +248,130 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 	case GPU_BUCKET_ID::eSoftbody:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbody(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eSoftbodies:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbodies(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eSoftbodyFemCloth:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbodyCloth(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eSoftbodyTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbodyTrimesh(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eSoftbodySdfTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbodySdfTrimesh(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eSoftbodyHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKSoftbodyHeightfield(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothSphere:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothSphere(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothPlane:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothPlane(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothBox:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothBox(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothConvexes:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothConvexes(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothes:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothCloth(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothTrimesh(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothSdfTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothSdfTrimesh(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 
 		break;
 	}
 	case GPU_BUCKET_ID::eFemClothHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKFemClothHeightfield(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 
 		break;
 	}
 	case GPU_BUCKET_ID::eConvexParticle:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKConvexParticle(managersGPU,
-			managers.mCpuContactManagerMapping.size());
+			numTests);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystems:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleSystemGpu(managersGPU,
-			managers.mCpuContactManagerMapping.size());
+			numTests);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystemSoftbody:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleSoftbody(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystemFemCloth:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleFemCloth(managersGPU,
-			managers.mCpuContactManagerMapping.size(), &renderOutput);
+			numTests, &renderOutput);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystemTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleTriMesh(managersGPU,
-			managers.mCpuContactManagerMapping.size());
+			numTests);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystemSdfTrimesh:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleSdfTriMesh(managersGPU,
-			managers.mCpuContactManagerMapping.size());
+			numTests);
 		break;
 	}
 	case GPU_BUCKET_ID::eParticlesystemHeightfield:
 	{
 		mContext->mGpuNarrowphaseCore->testSDKParticleHeightfield(managersGPU,
-			managers.mCpuContactManagerMapping.size());
+			numTests);
 		break;
 	}
 	case GPU_BUCKET_ID::eFallback:
@@ -380,7 +380,7 @@ void PxgCMGpuDiscreteUpdateBase::processContactManagers(PxgContactManagers& mana
 		break;
 	}
 
-	mContext->mGpuNarrowphaseCore->updateFrictionPatches(managersGPU, managers.mCpuContactManagerMapping.size(),
+	mContext->mGpuNarrowphaseCore->updateFrictionPatches(managersGPU, numTests,
 		mContext->mContext.mPatchStreamPool->mDataStream, mContext->mContext.mFrictionPatchStreamPool->mDataStream);
 
 	mContext->mMaxPatches = PxMax(mContext->mMaxPatches, maxPatches);
@@ -409,6 +409,7 @@ void PxgCMGpuDiscreteUpdateTask::runInternal()
 		processContactManagers(npCore->getExistingContactManagers(type),
 			npCore->getExistingGpuContactManagers(type), type);
 	}
+
 }
 
 void PxgCMGpuDiscreteSecondPassUpdateTask::runInternal()

@@ -4235,7 +4235,7 @@ extern "C" __global__ void artiPushImpulse(
 extern "C" __global__
 void buildStaticContactListsLaunch(
 	const ContactArticMapping* PX_RESTRICT mappings,
-	const PxU32 nContactManagers,
+	const PxU32 nContactManagers,                   // max launch size (graph-safe)
 	PxU32* PX_RESTRICT contactCounts,              // [nArticulations] — per-artic count
 	PxU32* PX_RESTRICT contactIndices,             // [nArticulations * maxPerArtic] — strided
 	PartitionNodeData* PX_RESTRICT nodeArray,      // [maxTotalContacts] — per-uniqueId

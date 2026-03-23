@@ -524,6 +524,49 @@ namespace physx
 		          "Single-stream mode requires mStaticContactsOnly (articulation-only scenes)");
 	}
 
+	void PxgGpuContext::setMaxCollisionPairs(PxU32 maxPairs)
+	{
+		PxgGpuNarrowphaseCore* np = getNarrowphaseCore();
+		np->mMaxCollisionPairs = maxPairs;
+		if (maxPairs == 0)
+			return;
+
+		CUstream stream = np->mStream;
+		PxCudaContext* cudaCtx = np->mCudaContext;
+
+		// Allocate dedicated CM count device variable (for future GPU CM lifecycle)
+		if (!np->mCmCount_d)
+		{
+			cuMemAlloc(&np->mCmCount_d, sizeof(PxU32));
+			cuMemsetD32Async(np->mCmCount_d, 0, 1, stream);
+		}
+
+		// Pre-allocate CM buffers for collision buckets to prevent runtime cuMalloc.
+		// allocateCopyOldDataAsync grows the buffer if needed, preserving existing warmup data.
+		// If already large enough, this is a no-op.
+		const PxU32 buckets[] = { GPU_BUCKET_ID::eConvex, GPU_BUCKET_ID::eConvexPlane };
+		for (PxU32 b = 0; b < 2; ++b)
+		{
+			PxU32 bucketId = buckets[b];
+			PxgGpuContactManagers& cms = np->mGpuContactManagers[bucketId]->mContactManagers;
+			PxU32 manifoldSize = BUCKET_ManifoldSize[bucketId];
+
+			cms.mContactManagerInputData.allocateCopyOldDataAsync(maxPairs * sizeof(PxgContactManagerInput), cudaCtx, stream, PX_FL);
+			cms.mContactManagerOutputData.allocateCopyOldDataAsync(maxPairs * sizeof(PxsContactManagerOutput), cudaCtx, stream, PX_FL);
+			if (manifoldSize > 0)
+				cms.mPersistentContactManifolds.allocateCopyOldDataAsync(maxPairs * manifoldSize, cudaCtx, stream, PX_FL);
+			cms.mCpuContactManagerMapping.allocateCopyOldDataAsync(maxPairs * sizeof(PxsContactManager*), cudaCtx, stream, PX_FL);
+			cms.mShapeInteractions.allocateCopyOldDataAsync(maxPairs * sizeof(Sc::ShapeInteraction*), cudaCtx, stream, PX_FL);
+			cms.mRestDistances.allocateCopyOldDataAsync(maxPairs * sizeof(PxReal), cudaCtx, stream, PX_FL);
+			cms.mTorsionalProperties.allocateCopyOldDataAsync(maxPairs * sizeof(PxsTorsionalFrictionData), cudaCtx, stream, PX_FL);
+			cms.mTempRunsumArray.allocateCopyOldDataAsync(2 * maxPairs * sizeof(PxU32), cudaCtx, stream, PX_FL);
+			cms.mTempRunsumArray2.allocateCopyOldDataAsync(maxPairs * sizeof(PxU32), cudaCtx, stream, PX_FL);
+			cms.mBlockAccumulationArray.allocateCopyOldDataAsync(sizeof(PxU32) * 256, cudaCtx, stream, PX_FL);
+			cms.mLostFoundPairsOutputData.allocateCopyOldDataAsync(maxPairs * sizeof(PxsContactManagerOutputCounts), cudaCtx, stream, PX_FL);
+			cms.mLostFoundPairsCms.allocateCopyOldDataAsync(maxPairs * sizeof(PxsContactManager*), cudaCtx, stream, PX_FL);
+		}
+	}
+
 	//this is the pre-prepare code for block format joints loaded from the non-block format joints
 
 	void PxgGpuContext::doConstraintJointBlockPrePrepGPU()
@@ -3046,6 +3089,7 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 					prepDescd + offsetof(PxgConstraintPrepareDesc, totalCurrentEdges),
 					mStaticUniqueIdCounter_d, sizeof(PxU32), solverStream);
 			}
+
 		}
 	}
 
