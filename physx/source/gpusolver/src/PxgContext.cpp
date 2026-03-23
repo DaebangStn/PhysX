@@ -682,17 +682,18 @@ namespace physx
 		mStaticContactMappingCount = idx;
 		mStaticContactMaxPerArtic = 8;  // conservative: max contacts per articulation
 
-		// Compute total allocation needed
+		// Compute total allocation needed (128-byte aligned sub-ranges for GPU vectorized access)
+		#define ALIGN128(x) (((x) + 127u) & ~127u)
 		const PxU32 maxTotalContacts = PxMax(idx, 1u);
 		const PxU64 totalNeeded =
-			idx * sizeof(ContactArticMapping) +                           // mapping
-			mArticulationCount * sizeof(PxU32) +                          // counts
-			mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32) + // indices
-			maxTotalContacts * sizeof(PartitionNodeData) +                // nodeArray
-			maxTotalContacts * sizeof(PxU32) +                            // npIndexArray
-			maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants) + // solverConsts
-			maxTotalContacts * sizeof(PartitionIndexData) +               // partIndexArray
-			sizeof(PxU32);                                                // uniqueIdCounter
+			ALIGN128(idx * sizeof(ContactArticMapping)) +
+			ALIGN128(mArticulationCount * sizeof(PxU32)) +
+			ALIGN128(mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32)) +
+			ALIGN128(maxTotalContacts * sizeof(PartitionNodeData)) +
+			ALIGN128(maxTotalContacts * sizeof(PxU32)) +
+			ALIGN128(maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants)) +
+			ALIGN128(maxTotalContacts * sizeof(PartitionIndexData)) +
+			sizeof(PxU32);
 
 		// Allocate single device buffer (lazy, only grow)
 		if (mStaticBufAllocSize < totalNeeded)
@@ -708,18 +709,19 @@ namespace physx
 				return;
 			}
 
-			// Assign sub-ranges (128-byte aligned offsets not critical for correctness)
+			// Assign sub-ranges with 128-byte alignment (GPU kernels use vectorized loads)
 			CUdeviceptr p = base;
-			mStaticContactMapping_d = p; p += idx * sizeof(ContactArticMapping);
-			mStaticContactCounts_d  = p; p += mArticulationCount * sizeof(PxU32);
-			mStaticContactIndices_d = p; p += mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32);
-			mStaticNodeArray_d      = p; p += maxTotalContacts * sizeof(PartitionNodeData);
-			mStaticNpIndexArray_d   = p; p += maxTotalContacts * sizeof(PxU32);
-			mStaticSolverConstants_d = p; p += maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants);
-			mStaticPartIndexArray_d = p; p += maxTotalContacts * sizeof(PartitionIndexData);
+			mStaticContactMapping_d = p; p += ALIGN128(idx * sizeof(ContactArticMapping));
+			mStaticContactCounts_d  = p; p += ALIGN128(mArticulationCount * sizeof(PxU32));
+			mStaticContactIndices_d = p; p += ALIGN128(mArticulationCount * mStaticContactMaxPerArtic * sizeof(PxU32));
+			mStaticNodeArray_d      = p; p += ALIGN128(maxTotalContacts * sizeof(PartitionNodeData));
+			mStaticNpIndexArray_d   = p; p += ALIGN128(maxTotalContacts * sizeof(PxU32));
+			mStaticSolverConstants_d = p; p += ALIGN128(maxTotalContacts * sizeof(PxgSolverConstraintManagerConstants));
+			mStaticPartIndexArray_d = p; p += ALIGN128(maxTotalContacts * sizeof(PartitionIndexData));
 			mStaticUniqueIdCounter_d = p;
 			mStaticBufAllocSize = totalNeeded;
 		}
+		#undef ALIGN128
 
 		// Upload mapping
 		PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
