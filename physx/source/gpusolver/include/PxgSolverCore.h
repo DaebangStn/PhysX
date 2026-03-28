@@ -196,10 +196,14 @@ namespace physx
 		/*PX_FORCE_INLINE void setArticulationCore(PxgArticulationCore* articulationCore) { mArticulationCore = articulationCore; }
 		PX_FORCE_INLINE PxgArticulationCore* getArticulationCore() { return mArticulationCore; }
 */
+		PX_FORCE_INLINE PxgPrePrepDesc* getPrePrepDesc() { return mPrePrepDesc; }
 		PX_FORCE_INLINE CUdeviceptr getPrePrepDescDeviceptr() { return mPrePrepDescd; }
 		PX_FORCE_INLINE CUdeviceptr getPrepDescDeviceptr() { return mPrepareDescd; }
 		PX_FORCE_INLINE CUdeviceptr getSolverCoreDescDeviceptr() { return mSolverCoreDescd; }
 		PX_FORCE_INLINE CUdeviceptr getSharedDescDeviceptr() { return mSharedDescd; }
+
+		// Upload patched host preprep descriptor to device (lean mode)
+		void refreshPrePrepDescToDevice(CUstream stream);
 
 		virtual PxU32 getDescriptorsAllocationSize() = 0;
 		virtual void allocatePinnedDescriptors(PxgPinnedHostLinearMemoryAllocator& hostAllocator) = 0;

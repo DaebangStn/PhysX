@@ -1153,9 +1153,8 @@ namespace physx
 			mForceStreamPool.mDataStreamSize - mForceStreamPool.mSharedDataIndex,
 			(PxU32)mForceStreamPool.mSharedDataIndex, (PxU32)mForceStreamPool.mSharedDataIndexGPU,
 			mForceChangedThresholdStream->begin(), mIncrementalPartition.hasForceThresholds(),
-			mConstraintWriteBackPool.begin(), mConstraintWriteBackPool.size(), 
+			mConstraintWriteBackPool.begin(), mConstraintWriteBackPool.size(),
 			(!mEnableDirectGPUAPI || getSimulationController()->getEnableOVDCollisionReadback()), mContactErrorVelIter);
-
 
 		mGpuSolverCore->integrateCoreParallel(offset, mSolverBodyPool.size());
 
@@ -1483,7 +1482,111 @@ namespace physx
 		mGpuSolverCore->releaseContext();
 	}
 
-	static void copyToSolverBodyStaticAndKinematic(PxgSolverBodyData& data, PxgSolverTxIData& txIData, const PxsBodyCore& core, PxNodeIndex nodeIndex)
+void PxgGpuContext::simulateLean()
+{
+	// Lean solver: direct GPU kernel launches for Phase B (artic-only, static contacts).
+	// Called from update() in lean mode, after buffer setup and allocateSolverBodyBuffers.
+	// All batch counts, partition data, and island context retain values from warmup.
+	// Context is already acquired by update().
+
+	PX_PROFILE_ZONE("PxgGpuContext.simulateLean", 0);
+
+	CUstream solverStream = mGpuSolverCore->getStream();
+	PxCudaContext* cudaCtx = getNarrowphaseCore()->mCudaContext;
+
+	// 1. Phase B contact mapping: map NP contact output to solver format
+	launchBuildContactMappingGPU(solverStream);
+	launchBuildStaticContactLists(solverStream);
+
+	// 2. Patch prep descriptor with actual contact count from GPU kernel output
+	{
+		CUdeviceptr prepDescd = mGpuSolverCore->getPrepDescDeviceptr();
+		if (prepDescd)
+		{
+			cudaCtx->memcpyDtoDAsync(
+				prepDescd + offsetof(PxgConstraintPrepareDesc, numArtiStaticContactBatches),
+				mStaticUniqueIdCounter_d, sizeof(PxU32), solverStream);
+			cudaCtx->memcpyDtoDAsync(
+				prepDescd + offsetof(PxgConstraintPrepareDesc, totalCurrentEdges),
+				mStaticUniqueIdCounter_d, sizeof(PxU32), solverStream);
+		}
+	}
+
+	// 3-5. Integration + articulation + internal constraints
+	doPreIntegrationGPU();
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] preIntegration: %d\n", (int)r); return; } }
+	doArticulationGPU();
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] articulation: %d\n", (int)r); return; } }
+
+	if (mIsTGS)
+	{
+		const PxReal stepDt = mDt / PxReal(mIslandContextPool->mNumPositionIterations);
+		mGpuArticulationCore->setupInternalConstraints(mArticulationCount, stepDt, mDt, 1.0f / stepDt, true);
+		{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] internalConstraints: %d\n", (int)r); return; } }
+	}
+
+	// 6. Joint block pre-prep
+	doConstraintJointBlockPrePrepGPU();
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] jointBlockPrePrep: %d\n", (int)r); return; } }
+
+	// 6.5. Sync articulation stream, then build batch headers for static contacts
+	// (normally done in doConstraintPrePrepGPUCommon)
+	mGpuArticulationCore->syncStream();
+	mGpuArticulationCore->createStaticContactAndConstraintsBatch(mArticulationCount);
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] createStaticBatch: %d\n", (int)r); return; } }
+
+	// 6.6. The device-side preprep descriptor retains correct values from warmup's
+	// H2D transfer (Phase B pointers, batch counts, etc.). GPU kernels
+	// (createStaticContactAndConstraintsBatch) update batch counts directly on device.
+	// DO NOT re-upload from host — that would overwrite GPU-written values with stale
+	// host data and cause error 700 in the preprep kernel.
+
+	// 6.7. constraintPrePrepParallel: rigid static batch setup + contact block pre-prep
+	{
+		const PxU32 totalBatches = mNumConstraintBatches + mNumRigidStaticConstraintBatches + mNumArticConstraintBatches + mNumArtiStaticConstraintBatches + mNumArtiSelfConstraintBatches;
+		fprintf(stderr, "[lean] batches: rigid=%u rigidStatic=%u artic=%u articStatic=%u articSelf=%u total=%u bodyCount=%u\n",
+			mNumConstraintBatches, mNumRigidStaticConstraintBatches, mNumArticConstraintBatches,
+			mNumArtiStaticConstraintBatches, mNumArtiSelfConstraintBatches, totalBatches, mIslandContextPool->mBodyCount);
+		mGpuSolverCore->constraintPrePrepParallel(totalBatches, 0, mIslandContextPool->mBodyCount);
+	}
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] constraintPrePrep: %d\n", (int)r); return; } }
+
+	// 7-9. Constraint prep, solve, merge
+	doConstraintPrepGPU();
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] constraintPrep: %d\n", (int)r); return; } }
+
+	// Populate partition arrays from incremental partition (normally done in doConstraintPrePrepGPUCommon)
+	// In lean mode, doConstraintPrePrepGPUCommon is skipped, so these must be set here.
+	{
+		const PxU32 nbCombinedSlabPartitions = mIncrementalPartition.getCombinedSlabNbPartitions();
+		mConstraintsPerPartition.forceSize_Unsafe(0);
+		mArtiConstraintsPerPartition.forceSize_Unsafe(0);
+		for (PxU32 a = 0; a < nbCombinedSlabPartitions; ++a)
+		{
+			mConstraintsPerPartition.pushBack(mIncrementalPartition.getCSlabAccumulatedPartitionCount(a));
+			mArtiConstraintsPerPartition.pushBack(mIncrementalPartition.getCSlabAccumulatedArtiPartitionCount(a));
+		}
+		mIslandContextPool->mStartPartitionIndex = 0;
+		mIslandContextPool->mNumPartitions = nbCombinedSlabPartitions;
+		mIslandContextPool->mBatchStartIndex = 0;
+		mIslandContextPool->mBatchCount = mIncrementalPartition.getNbConstraintBatches() + mIncrementalPartition.getNbContactBatches();
+		mIslandContextPool->mArtiBatchStartIndex = 0;
+		mIslandContextPool->mArtiBatchCount = mIncrementalPartition.getNbArtiConstraintBatches() + mIncrementalPartition.getNbArtiContactBatches();
+
+		mIslandContextPool->mStaticArtiBatchCount = mNumArtiStaticConstraintBatches;
+		mIslandContextPool->mSelfArtiBatchCount = mNumArtiSelfConstraintBatches;
+		mIslandContextPool->mStaticRigidBatchCount = mNumRigidStaticConstraintBatches;
+	}
+
+	PxBitMapPinned emptyChangedHandleMap;
+	doConstraintSolveGPU(mArticulationCount, emptyChangedHandleMap);
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] constraintSolve: %d\n", (int)r); return; } }
+
+	mergeResults();
+	{ CUresult r = cuStreamSynchronize(solverStream); if(r) { fprintf(stderr, "[lean] mergeResults: %d\n", (int)r); return; } }
+}
+
+static void copyToSolverBodyStaticAndKinematic(PxgSolverBodyData& data, PxgSolverTxIData& txIData, const PxsBodyCore& core, PxNodeIndex nodeIndex)
 	{
 		// PT: not needed for statics/kinematics
 //		if(core.disableGravity)
@@ -2635,7 +2738,6 @@ void PxgGpuTask::runInternal()
 	mContext.mGpuSolverCore->acquireContext();
 
 	mContext.doConstraintJointBlockPrePrepGPU();
-
 	mContext.doConstraintPrepGPU();
 	mContext.doConstraintSolveGPU(mMaxNodes, *mChangedHandleMap);
 
@@ -2874,6 +2976,36 @@ void PxgGpuContext::update(	Cm::FlushPool& flushPool, PxBaseTask* continuation, 
 		getSimulationController()->getJointManager().reserveMemoryPreAddRemove();
 	}
 
+	// Lean mode: skip task chain + island management, run GPU solver kernels directly.
+	// All member variables (batch counts, partition data, island context) retain values from
+	// the last normal (warmup) frame. The task chain reference counts work out because we
+	// skip both mGpuTask.setContinuation(continuation) and updateIncrementalIslands(),
+	// so neither continuation nor postPartitioningTask get the extra addRef.
+	if (getSimulationController()->isLeanMode() && mIncrementalPartition.getStaticContactsOnly()
+		&& needsSolve(islandSim, bodyCount, articulationCount))
+	{
+		const PxNodeIndex* const PX_RESTRICT articulationNodeIndices = islandSim.getActiveNodes(IG::Node::eARTICULATION_TYPE);
+
+		PxMemCopy(mActiveNodeIndex.begin() + 1, islandSim.getActiveKinematics(), islandSim.getNbActiveKinematics() * sizeof(PxNodeIndex));
+		PxMemCopy(mActiveNodeIndex.begin() + mArticulationStartIndex, articulationNodeIndices, sizeof(PxNodeIndex) * mArticulationCount);
+		mActiveNodeIndex[0] = PxNodeIndex();
+
+		PxgSimulationController* controller = static_cast<PxgSimulationController*>(mSimulationController);
+		mGpuSolverCore->allocateSolverBodyBuffers(mIslandManager.getNbNodeHandles() + 1, mActiveNodeIndex, mArticulationCount, controller->getMaxLinks());
+
+		mSolvedThisFrame = true;
+
+		mSolverBodyPool[0] = mWorldSolverBody;
+		mSolverBodyDataPool[0] = mWorldSolverBodyData;
+		mSolverTxIDataPool[0] = mWorldTxIData;
+		mSolverBodySleepDataPool[0] = mWorldSolverBodySleepData;
+
+		simulateLean();
+
+		mGpuSolverCore->releaseContext();
+		return;
+	}
+
 	if (needsSolve(islandSim, bodyCount, articulationCount))
 	{
 		//Set up gpu workloads early!!!
@@ -2935,6 +3067,11 @@ void PxgGpuContext::updatePostPartitioning(PxBaseTask* lostTouchTask, PxvNphaseI
 	PxU32 maxPatchesPerCM, PxU32 /*maxArticulationLinks*/,
 	PxReal /*dt*/, const PxVec3& /*gravity*/, PxBitMapPinned& changedHandleMap)
 {
+	// Lean mode: all solver work was done in update() via simulateLean().
+	// Nothing to do here — member variables retain valid state from warmup.
+	if (getSimulationController()->isLeanMode() && mIncrementalPartition.getStaticContactsOnly())
+		return;
+
 	mGpuSolverCore->acquireContext();
 
 	IG::IslandSim& islandSim = mIslandManager.getAccurateIslandSim();

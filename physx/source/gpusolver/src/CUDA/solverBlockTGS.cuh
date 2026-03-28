@@ -682,7 +682,7 @@ static __device__ void writeBackContactBlockTGS(const PxgBlockConstraintBatch& b
 	{
 		const PxgTGSBlockSolverContactHeader* PX_RESTRICT contactHeader = &contactHeaders[batch.mConstraintBatchIndex];
 		const PxgTGSBlockSolverFrictionHeader* PX_RESTRICT frictionHeader = &frictionHeaders[batch.mConstraintBatchIndex];
-	
+
 		PxU32 forceWritebackOffset = contactHeader->forceWritebackOffset[threadIndex];
 
 		forceThreshold = contactHeader->flags[threadIndex] & PxgSolverContactFlags::eHAS_FORCE_THRESHOLDS;

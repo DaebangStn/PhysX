@@ -1092,6 +1092,16 @@ void PxgTGSCudaSolverCore::nonRigidConstraintPrepare(PxU32 numArticulations)
 
 void PxgTGSCudaSolverCore::writeBackBlock(PxU32 a, PxgIslandContext& context)
 {
+	// Phase B (numPartitions==0): the partition solver didn't run, so no contact
+	// results need writing back.  Static-artic batches are handled by
+	// propagateRigidBodyImpulsesAndSolveInternalConstraints which has its own
+	// writeback path.  Launching writebackBlocksTGS on uninitialized friction
+	// patch data causes CUDA error 700.
+	// In lean mode, numPartitions > 0 (from warmup snapshot), so this guard
+	// never triggers and writeBack runs normally.
+	if (context.mNumPartitions == 0 && context.mBatchCount == 0 && context.mArtiBatchCount == 0)
+		return;
+
 	const CUfunction writebackBlockFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::WRITEBACK_BLOCKS_TGS);
 
 	PxCudaKernelParam kernelParams[] =
@@ -1109,11 +1119,6 @@ void PxgTGSCudaSolverCore::writeBackBlock(PxU32 a, PxgIslandContext& context)
 		if (result != CUDA_SUCCESS)
 			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU mWritebackBlockFunction fail to launch kernel!!\n");
 
-#if GPU_DEBUG
-		result = mCudaContext->streamSynchronize(mStream);
-		if (result != CUDA_SUCCESS)
-			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU mWritebackBlockFunction kernel fail!\n");
-#endif	
 	}
 }
 
@@ -1313,11 +1318,6 @@ void PxgTGSCudaSolverCore::solveContactMultiBlockParallel(PxgIslandContext* isla
 				if (result != CUDA_SUCCESS)
 					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU initializeSolverVelocitiesTGS fail to launch kernel!! %i\n", result);
 
-#if GPU_DEBUG
-				result = mCudaContext->streamSynchronize(mStream);
-				if (result != CUDA_SUCCESS)
-					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU initializeSolverVelocitiesTGS kernel fail!\n");
-#endif
 			}
 		}
 
@@ -1387,7 +1387,7 @@ void PxgTGSCudaSolverCore::solveContactMultiBlockParallel(PxgIslandContext* isla
 			{
 				//tendons + mimic joints + friction + drive + pos limit
 				mGpuContext->getArticulationCore()->propagateRigidBodyImpulsesAndSolveInternalConstraints(
-					stepDt, invStepDt, isVelocityIteration, accumulatedDt, biasCoefficient, firstPassArticulationConstraintProcessConfig, 
+					stepDt, invStepDt, isVelocityIteration, accumulatedDt, biasCoefficient, firstPassArticulationConstraintProcessConfig,
 					reinterpret_cast<PxU32*>(mArtiOrderedStaticContacts.getDevicePtr()),
 					reinterpret_cast<PxU32*>(mArtiOrderedStaticConstraints.getDevicePtr()), mSharedDescd,
 					doFriction, isTGS, residualReportingEnabled, externalForcesEveryTgsIterationEnabled);
@@ -1532,11 +1532,6 @@ void PxgTGSCudaSolverCore::solveContactMultiBlockParallel(PxgIslandContext* isla
 				if (result != CUDA_SUCCESS)
 					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU concludeBlockFunction fail to launch kernel!!\n");
 
-#if GPU_DEBUG
-				result = mCudaContext->streamSynchronize(mStream);
-				if (result != CUDA_SUCCESS)
-					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU concludeBlockFunction kernel fail!\n");
-#endif
 			}
 		}
 

@@ -45,6 +45,7 @@
 #include "PxgArticulationCoreKernelIndices.h"
 #include "DyConstraintPrep.h"
 #include "PxgIslandContext.h"
+#include <cstdio>
 
 #define GPU_CORE_DEBUG 0
 
@@ -184,11 +185,15 @@ PX_COMPILE_TIME_ASSERT(sizeof(PxgFrictionPatchGPU) == sizeof(PxFrictionPatch));
 
 void PxgSolverCore::allocateFrictionPatchStream(PxI32 numContactBatches, PxI32 numArtiContactBatches)
 {
-	mFrictionPatchBlockStream[mCurrentIndex].allocate(sizeof(PxgBlockFrictionPatch) * (numContactBatches + numArtiContactBatches), PX_FL);
-	mFrictionAnchorPatchBlockStream[mCurrentIndex].allocate(sizeof(PxgBlockFrictionAnchorPatch) * (numContactBatches + numArtiContactBatches), PX_FL);
+	const PxU64 totalBatches = PxU64(numContactBatches) + PxU64(numArtiContactBatches);
+	mFrictionPatchBlockStream[mCurrentIndex].allocate(sizeof(PxgBlockFrictionPatch) * totalBatches, PX_FL);
+	mFrictionAnchorPatchBlockStream[mCurrentIndex].allocate(sizeof(PxgBlockFrictionAnchorPatch) * totalBatches, PX_FL);
 
-	/*frictionPatchStream[currentIndex].allocate(sizeof(PxgFrictionPatch) * numArtiContactBatches);
-	frictionAnchorPatchStream[currentIndex].allocate(sizeof(PxgFrictionAnchorPatch) * numArtiContactBatches);*/
+	// Init patchIndex sentinel (0xFFFFFFFF) so writeBackContactBlockFriction
+	// safely skips entries that constraint prep didn't populate.
+	if (totalBatches)
+		mCudaContext->memsetD8Async(mFrictionPatchBlockStream[mCurrentIndex].getDevicePtr(),
+			0xFF, sizeof(PxgBlockFrictionPatch) * totalBatches, mStream);
 }
 
 void PxgSolverCore::allocateFrictionCounts(PxU32 totalEdges)
@@ -265,7 +270,9 @@ void PxgSolverCore::allocateSolverBodyBuffersCommon(PxU32 numSolverBodies, PxPin
 	
 	mIslandNodeIndices2.allocate(sizeof(PxNodeIndex) * islandNodeIndices.size(), PX_FL);
 
-	mCudaContext->memsetD32Async(mSolverBodyIndices.getDevicePtr(), 0xFFffFFff, numSolverBodies, mStream);
+	// Init to 0 (static body index) so unset articulation entries map to the
+	// valid static-body slot instead of 0xFFFFFFFF which would crash writeBack.
+	mCudaContext->memsetD32Async(mSolverBodyIndices.getDevicePtr(), 0, numSolverBodies, mStream);
 	mCudaContext->memcpyHtoDAsync(mIslandNodeIndices2.getDevicePtr(), islandNodeIndices.begin(), sizeof(PxNodeIndex) *islandNodeIndices.size(), mStream);
 
 	synchronizeStreams(mCudaContext, mStream, mGpuContext->getArticulationCore()->getStream());
@@ -412,6 +419,12 @@ void PxgSolverCore::constructConstraintPrePrepDesc(PxgPrePrepDesc& preDesc, PxU3
 	preDesc.mTempConstraintBlockHeader = reinterpret_cast<PxU32*>(mTempConstraintHeaderBlockBuffer.getDevicePtr());
 }
 
+void PxgSolverCore::refreshPrePrepDescToDevice(CUstream stream)
+{
+	if (mPrePrepDescd && mPrePrepDesc)
+		mCudaContext->memcpyHtoDAsync(mPrePrepDescd, mPrePrepDesc, sizeof(PxgPrePrepDesc), stream);
+}
+
 void PxgSolverCore::constructSolverSharedDescCommon(PxgSolverSharedDescBase& sharedDesc, const PxgConstantData& cData,
 	Cm::UnAlignedSpatialVector* deferredZ, PxU32* articulationDirty, uint4* articulationSlabMask)
 {
@@ -545,13 +558,7 @@ void PxgSolverCore::constraintPrePrepParallel(PxU32 nbConstraintBatches, PxU32 n
 		CUresult launchResult = mCudaContext->launchKernel(staticKernel1, nbBlocksRequired, 1, 1, PxgKernelBlockDim::COMPUTE_STATIC_CONTACT_CONSTRAINT_COUNT, 1, 1, 0, mStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
 		PX_ASSERT(launchResult == CUDA_SUCCESS);
 		PX_UNUSED(launchResult);
-
-#if GPU_CORE_DEBUG
-		CUresult result = mCudaContext->streamSynchronize(mStream);
-		PX_ASSERT(result == CUDA_SUCCESS);
-		if (result != CUDA_SUCCESS)
-			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU rigidSumInternalContactAndJointBatches1 kernel fail!\n");
-#endif
+		{ CUresult r = cuStreamSynchronize(mStream); if(r) { fprintf(stderr, "[preprep] staticKernel1: %d\n", (int)r); return; } }
 	}
 
 	{
@@ -570,13 +577,7 @@ void PxgSolverCore::constraintPrePrepParallel(PxU32 nbConstraintBatches, PxU32 n
 		CUresult launchResult = mCudaContext->launchKernel(staticKernel2, nbBlocksRequired, 1, 1, PxgKernelBlockDim::COMPUTE_STATIC_CONTACT_CONSTRAINT_COUNT, 1, 1, 0, mStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
 		PX_ASSERT(launchResult == CUDA_SUCCESS);
 		PX_UNUSED(launchResult);
-
-#if GPU_CORE_DEBUG
-		CUresult result = mCudaContext->streamSynchronize(mStream);
-		PX_ASSERT(result == CUDA_SUCCESS);
-		if (result != CUDA_SUCCESS)
-			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU rigidSumInternalContactAndJointBatches1 kernel fail!\n");
-#endif
+		{ CUresult r = cuStreamSynchronize(mStream); if(r) { fprintf(stderr, "[preprep] staticKernel2: %d\n", (int)r); return; } }
 	}
 
 	//////////////////////////////////////
@@ -593,18 +594,47 @@ void PxgSolverCore::constraintPrePrepParallel(PxU32 nbConstraintBatches, PxU32 n
 
 	const PxU32 nbBlocksRequired = (nbConstraintBatches*PXG_BATCH_SIZE + PxgKernelBlockDim::CONSTRAINT_PREPREP_BLOCK - 1) / PxgKernelBlockDim::CONSTRAINT_PREPREP_BLOCK;
 
+	fprintf(stderr, "[preprep] CONTACT_CONSTRAINT_PREPREP_BLOCK: nbBlocks=%u, nbBatches=%u\n", nbBlocksRequired, nbConstraintBatches);
+
+	// Diagnostic: dump device preprep before crashing kernel
+	if (mStaticContactsOnly && nbBlocksRequired > 0)
+	{
+		PxgPrePrepDesc hostCopy;
+		CUresult cpyR = cuMemcpyDtoH(&hostCopy, mPrePrepDescd, sizeof(PxgPrePrepDesc));
+		fprintf(stderr, "[preprep-dump] D2H result=%d\n", (int)cpyR);
+		fprintf(stderr, "[preprep-dump] blockBatches=%p blockWorkUnit=%p\n", hostCopy.blockBatches, hostCopy.blockWorkUnit);
+		fprintf(stderr, "[preprep-dump] numBatches=%u numStaticBatches=%u numArtiBatches=%u numArtiStaticBatches=%u numArtiSelfBatches=%u\n",
+			hostCopy.numBatches, hostCopy.numStaticBatches, hostCopy.numArtiBatches, hostCopy.numArtiStaticBatches, hostCopy.numArtiSelfBatches);
+		fprintf(stderr, "[preprep-dump] mBatchHeaders=%p mContactUniqueIndices=%p mArtiContactUniqueIndices=%p\n",
+			hostCopy.mBatchHeaders, hostCopy.mContactUniqueIndices, hostCopy.mArtiContactUniqueIndices);
+		fprintf(stderr, "[preprep-dump] mContactConstantData=%p mPartitionNodeData=%p mNpOutputIndices=%p\n",
+			hostCopy.mContactConstantData, hostCopy.mPartitionNodeData, hostCopy.mNpOutputIndices);
+		fprintf(stderr, "[preprep-dump] contactManagerOutputBase=%p solverBodyIndices=%p mSolverBodyData=%p\n",
+			hostCopy.contactManagerOutputBase, hostCopy.solverBodyIndices, hostCopy.mSolverBodyData);
+		fprintf(stderr, "[preprep-dump] mPartitionIndices=%p mShapeInteractions=%p mRestDistances=%p\n",
+			hostCopy.mPartitionIndices, hostCopy.mShapeInteractions, hostCopy.mRestDistances);
+		fprintf(stderr, "[preprep-dump] cpuCompressedContactsBase=%p cpuCompressedPatchesBase=%p cpuForceBufferBase=%p\n",
+			hostCopy.cpuCompressedContactsBase, hostCopy.cpuCompressedPatchesBase, hostCopy.cpuForceBufferBase);
+		fprintf(stderr, "[preprep-dump] compressedContacts=%p compressedPatches=%p forceBuffer=%p\n",
+			hostCopy.compressedContacts, hostCopy.compressedPatches, hostCopy.forceBuffer);
+		fprintf(stderr, "[preprep-dump] mTotalActiveArticulations=%u mTotalActiveBodies=%u mMaxConstraintPartitions=%u mTotalSlabs=%u\n",
+			hostCopy.mTotalActiveArticulations, hostCopy.mTotalActiveBodies, hostCopy.mMaxConstraintPartitions, hostCopy.mTotalSlabs);
+		fprintf(stderr, "[preprep-dump] numTotalContacts=%u numTotalStaticContacts=%u numTotalArtiContacts=%u numTotalStaticArtiContacts=%u\n",
+			hostCopy.numTotalContacts, hostCopy.numTotalStaticContacts, hostCopy.numTotalArtiContacts, hostCopy.numTotalStaticArtiContacts);
+		fprintf(stderr, "[preprep-dump] artiStaticContactBatchOffset=%u artiStaticConstraintBatchOffset=%u\n",
+			hostCopy.artiStaticContactBatchOffset, hostCopy.artiStaticConstraintBatchOffset);
+		fprintf(stderr, "[preprep-dump] mCmOutputOffsets:");
+		for (PxU32 i = 0; i < GPU_BUCKET_ID::eCount; ++i)
+			fprintf(stderr, " %u", hostCopy.mCmOutputOffsets[i]);
+		fprintf(stderr, "\n");
+	}
+
 	if (nbBlocksRequired > 0)
 	{
 		CUresult launchResult = mCudaContext->launchKernel(kernelFunction, nbBlocksRequired, 1, 1, PxgKernelBlockDim::CONSTRAINT_PREPREP_BLOCK, 1, 1, 0, mStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
 		PX_ASSERT(launchResult == CUDA_SUCCESS);
 		PX_UNUSED(launchResult);
-
-#if GPU_CORE_DEBUG
-		CUresult result = mCudaContext->streamSynchronize(mStream);
-		PX_ASSERT(result == CUDA_SUCCESS);
-		if (result != CUDA_SUCCESS)
-			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU constraintContactBlockPrePrepLaunch kernel fail!\n");
-#endif
+		{ CUresult r = cuStreamSynchronize(mStream); if(r) { fprintf(stderr, "[preprep] CONTACT_CONSTRAINT_PREPREP_BLOCK: %d\n", (int)r); return; } }
 	}
 
 	const PxU32 nbD6JointsBlocks = (nbD6Joints + PxgKernelBlockDim::CONSTRAINT_PREPREP_BLOCK - 1) / PxgKernelBlockDim::CONSTRAINT_PREPREP_BLOCK;
